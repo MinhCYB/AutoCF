@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon Uploader — Upload Progress</title>
+    <meta name="description" content="Theo dõi tiến trình upload bài lên Polygon">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+        <div class="app-logo">🔷</div>
+        <div style="flex:1">
+            <h1 class="app-title" id="page-title">Upload Progress</h1>
+            <p class="app-subtitle" id="page-subtitle">Đang chuẩn bị upload...</p>
+        </div>
+    </header>
+
+    <!-- Pre-upload: list of problems to upload -->
+    <div id="pre-upload" class="card">
+        <div class="card-header">
+            <div class="card-icon blue">🚀</div>
+            <div>
+                <div class="card-title">Sẵn sàng upload</div>
+                <div class="card-desc" id="upload-summary">Đang kiểm tra...</div>
+            </div>
+        </div>
+        <div id="pre-upload-list" class="mt-2"></div>
+        <div class="actions-bar">
+            <a href="/preview" class="btn btn-ghost">← Quay lại Preview</a>
+            <button class="btn btn-primary btn-lg" id="btn-start-upload" onclick="startUpload()" disabled>
+                🚀 Bắt đầu Upload
+            </button>
+        </div>
+    </div>
+
+    <!-- Upload progress -->
+    <div id="upload-progress" class="hidden">
+        <!-- Progress bar -->
+        <div class="card">
+            <div class="card-header">
+                <div class="card-icon blue">📊</div>
+                <div>
+                    <div class="card-title" id="progress-title">ĐANG UPLOAD...</div>
+                    <div class="card-desc" id="progress-desc">0 / 0</div>
+                </div>
+            </div>
+            <div class="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                </div>
+                <div class="progress-text" id="progress-text">0%</div>
+            </div>
+        </div>
+
+        <!-- Problem status list -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <div class="card-icon green">📋</div>
+                <div class="card-title">Danh sách bài</div>
+            </div>
+            <div id="problem-status-list"></div>
+        </div>
+
+        <!-- Log panel -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <div class="card-icon amber">📜</div>
+                <div class="card-title">Log chi tiết</div>
+            </div>
+            <div class="log-panel" id="log-panel"></div>
+        </div>
+
+        <!-- Done actions -->
+        <div id="done-actions" class="hidden">
+            <div class="actions-bar">
+                <a href="/" class="btn btn-secondary">← Quay lại Config</a>
+                <a href="https://polygon.codeforces.com" target="_blank" class="btn btn-primary">
+                    🌐 Mở Polygon
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── State ───
+let problems = [];
+let uploadProblems = [];
+let eventSource = null;
+
+// ─── Init ───
+(async function init() {
+    try {
+        const resp = await fetch('/api/problems');
+        const data = await resp.json();
+
+        if (!data.problems || data.problems.length === 0) {
+            document.getElementById('upload-summary').textContent = 'Không có bài nào';
+            return;
+        }
+
+        problems = data.problems;
+
+        // Filter only confirmed/parsed problems
+        uploadProblems = problems.filter(p =>
+            p.status === 'confirmed' || p.status === 'parsed'
+        );
+
+        if (uploadProblems.length === 0) {
+            document.getElementById('upload-summary').textContent = 'Không có bài nào được confirm';
+            return;
+        }
+
+        document.getElementById('upload-summary').textContent =
+            `${uploadProblems.length} bài sẵn sàng upload`;
+        document.getElementById('btn-start-upload').disabled = false;
+
+        // Render pre-upload list
+        let html = '';
+        for (const p of uploadProblems) {
+            const prob = p.problem;
+            html += `<div class="problem-item">
+                <span class="problem-icon">📄</span>
+                <div class="problem-info">
+                    <div class="problem-name">${escHtml(prob.polygon_name)}</div>
+                    <div class="problem-meta">${escHtml(prob.title)} • ${prob.time_limit}ms / ${prob.memory_limit}MB</div>
+                </div>
+                <span class="badge badge-info">${p.status}</span>
+            </div>`;
+        }
+        document.getElementById('pre-upload-list').innerHTML = html;
+
+    } catch (e) {
+        document.getElementById('upload-summary').textContent = 'Lỗi: ' + e.message;
+    }
+})();
+
+// ─── Start Upload ───
+async function startUpload() {
+    const btn = document.getElementById('btn-start-upload');
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang bắt đầu...';
+
+    const indices = uploadProblems.map(p => p.index);
+
+    try {
+        const resp = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ indices }),
+        });
+        const data = await resp.json();
+
+        if (data.error) {
+            showToast(data.error, 'error');
+            btn.disabled = false;
+            btn.textContent = '🚀 Bắt đầu Upload';
+            return;
+        }
+
+        // Switch to progress view
+        document.getElementById('pre-upload').classList.add('hidden');
+        document.getElementById('upload-progress').classList.remove('hidden');
+        document.getElementById('page-subtitle').textContent = 'Đang upload...';
+
+        // Initialize problem status list
+        initStatusList();
+
+        // Connect SSE
+        connectSSE();
+
+    } catch (e) {
+        showToast('Lỗi: ' + e.message, 'error');
+        btn.disabled = false;
+        btn.textContent = '🚀 Bắt đầu Upload';
+    }
+}
+
+// ─── Status List ───
+function initStatusList() {
+    const container = document.getElementById('problem-status-list');
+    let html = '';
+    for (const p of uploadProblems) {
+        html += `<div class="problem-item" id="status-${p.index}">
+            <span class="problem-icon" id="status-icon-${p.index}">⏳</span>
+            <div class="problem-info">
+                <div class="problem-name">${escHtml(p.problem.polygon_name)}</div>
+                <div class="problem-meta" id="status-meta-${p.index}">Đang chờ...</div>
+            </div>
+            <span class="badge badge-info" id="status-badge-${p.index}">pending</span>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function updateStatus(index, status, message) {
+    const iconEl = document.getElementById(`status-icon-${index}`);
+    const metaEl = document.getElementById(`status-meta-${index}`);
+    const badgeEl = document.getElementById(`status-badge-${index}`);
+    const itemEl = document.getElementById(`status-${index}`);
+
+    if (!iconEl) return;
+
+    switch (status) {
+        case 'uploading':
+            iconEl.textContent = '🔄';
+            badgeEl.className = 'badge badge-warning';
+            badgeEl.textContent = 'uploading';
+            metaEl.textContent = message || 'Đang upload...';
+            if (itemEl) itemEl.style.borderColor = 'var(--warning)';
+            break;
+        case 'done':
+            iconEl.textContent = '✅';
+            badgeEl.className = 'badge badge-success';
+            badgeEl.textContent = 'done';
+            metaEl.textContent = message || 'Hoàn tất';
+            if (itemEl) itemEl.style.borderColor = 'var(--success)';
+            break;
+        case 'error':
+            iconEl.textContent = '❌';
+            badgeEl.className = 'badge badge-error';
+            badgeEl.textContent = 'error';
+            metaEl.textContent = message || 'Lỗi';
+            if (itemEl) itemEl.style.borderColor = 'var(--error)';
+            break;
+    }
+}
+
+// ─── SSE ───
+function connectSSE() {
+    eventSource = new EventSource('/api/status');
+    let completed = 0;
+    let total = uploadProblems.length;
+
+    eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        switch (data.type) {
+            case 'start':
+                total = data.total;
+                addLog(`Bắt đầu upload ${total} bài`, 'info');
+                break;
+
+            case 'problem_start':
+                updateStatus(data.index, 'uploading', `Đang upload: ${data.name}`);
+                addLog(`── ${data.name} ──`, 'info');
+                break;
+
+            case 'log':
+                addLog(data.message);
+                // Update meta text
+                const metaEl = document.getElementById(`status-meta-${data.index}`);
+                if (metaEl) metaEl.textContent = data.message;
+                break;
+
+            case 'problem_done':
+                completed = data.progress;
+                updateStatus(data.index, 'done', 'Upload thành công');
+                updateProgress(completed, total);
+                addLog(`✅ ${data.result.name} — hoàn tất`, 'success');
+                break;
+
+            case 'problem_error':
+                completed = data.progress;
+                updateStatus(data.index, 'error', data.error);
+                updateProgress(completed, total);
+                addLog(`❌ Lỗi: ${data.error}`, 'error');
+                break;
+
+            case 'done':
+                onUploadDone(total);
+                eventSource.close();
+                break;
+
+            case 'fatal_error':
+                addLog(`🔥 Lỗi nghiêm trọng: ${data.error}`, 'error');
+                onUploadDone(total, true);
+                eventSource.close();
+                break;
+        }
+    };
+
+    eventSource.onerror = () => {
+        addLog('Mất kết nối với server', 'error');
+        eventSource.close();
+    };
+}
+
+// ─── Progress ───
+function updateProgress(completed, total) {
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
+    document.getElementById('progress-fill').style.width = pct + '%';
+    document.getElementById('progress-text').textContent = `${pct}% (${completed}/${total})`;
+    document.getElementById('progress-desc').textContent = `${completed} / ${total}`;
+}
+
+// ─── Log ───
+function addLog(message, type = '') {
+    const panel = document.getElementById('log-panel');
+    const time = new Date().toLocaleTimeString('vi-VN');
+
+    const entry = document.createElement('div');
+    entry.className = 'log-entry';
+
+    let msgClass = '';
+    if (type === 'success' || message.includes('✅')) msgClass = 'log-success';
+    else if (type === 'error' || message.includes('❌') || message.includes('🔥')) msgClass = 'log-error';
+    else if (type === 'info' || message.includes('──')) msgClass = 'log-info';
+    else if (type === 'warn' || message.includes('⚠️')) msgClass = 'log-warn';
+
+    entry.innerHTML = `<span class="log-time">[${time}]</span><span class="${msgClass}">${escHtml(message)}</span>`;
+    panel.appendChild(entry);
+
+    // Auto-scroll
+    panel.scrollTop = panel.scrollHeight;
+}
+
+// ─── Done ───
+function onUploadDone(total, hasError = false) {
+    document.getElementById('progress-title').textContent = hasError ? 'UPLOAD HOÀN TẤT (có lỗi)' : 'UPLOAD HOÀN TẤT! 🎉';
+    document.getElementById('page-subtitle').textContent = hasError ? 'Có một số lỗi xảy ra' : 'Tất cả bài đã được upload thành công';
+    document.getElementById('done-actions').classList.remove('hidden');
+    updateProgress(total, total);
+
+    // Stop shimmer animation
+    document.getElementById('progress-fill').style.setProperty('--shimmer', 'none');
+
+    addLog(hasError ? '⚠️ Upload hoàn tất với một số lỗi' : '🎉 Tất cả đã upload thành công!', hasError ? 'warn' : 'success');
+}
+
+// ─── Utils ───
+function escHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+</script>
+
+</body>
+</html>

@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon Uploader — Config</title>
+    <meta name="description" content="Tự động upload bài tập lập trình lên Polygon">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+        <div class="app-logo">🔷</div>
+        <div>
+            <h1 class="app-title">Polygon Uploader</h1>
+            <p class="app-subtitle">Upload hàng loạt bài tập lên Polygon</p>
+        </div>
+    </header>
+
+    <!-- Polygon API Config -->
+    <div class="card" id="card-polygon">
+        <div class="card-header">
+            <div class="card-icon blue">🔑</div>
+            <div>
+                <div class="card-title">Polygon API</div>
+                <div class="card-desc">API key từ polygon.codeforces.com → Settings</div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="polygon-key">API Key</label>
+                <input type="password" id="polygon-key" placeholder="Nhập Polygon API Key...">
+            </div>
+            <div class="form-group">
+                <label for="polygon-secret">Secret</label>
+                <input type="password" id="polygon-secret" placeholder="Nhập Polygon Secret...">
+            </div>
+        </div>
+    </div>
+
+    <!-- Gemini API Config -->
+    <div class="card" id="card-gemini">
+        <div class="card-header">
+            <div class="card-icon green">🤖</div>
+            <div>
+                <div class="card-title">Gemini API</div>
+                <div class="card-desc">API key từ aistudio.google.com</div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="gemini-key">API Key</label>
+            <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
+        </div>
+    </div>
+
+    <!-- Batch Config -->
+    <div class="card" id="card-batch">
+        <div class="card-header">
+            <div class="card-icon amber">⚙️</div>
+            <div>
+                <div class="card-title">Batch Config</div>
+                <div class="card-desc">Cấu hình đặt tên bài trên Polygon</div>
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="level">Level</label>
+                <select id="level">
+                    <option value="lv1">lv1</option>
+                    <option value="lv2">lv2</option>
+                    <option value="lv3">lv3</option>
+                    <option value="lv4">lv4</option>
+                    <option value="lv5">lv5</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="contest-name">Contest Name</label>
+                <input type="text" id="contest-name" placeholder="vd: array, dp, graph...">
+            </div>
+            <div class="form-group">
+                <label for="start-index">Start Index</label>
+                <input type="number" id="start-index" value="1" min="1">
+            </div>
+        </div>
+        <div class="form-group">
+            <label for="lang">Statement Language</label>
+            <select id="lang">
+                <option value="vietnamese">Vietnamese</option>
+                <option value="english">English</option>
+                <option value="russian">Russian</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Problems Folder -->
+    <div class="card" id="card-folder">
+        <div class="card-header">
+            <div class="card-icon blue">📁</div>
+            <div>
+                <div class="card-title">Problems Folder</div>
+                <div class="card-desc">Chọn thư mục chứa các bài tập</div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label>Thư mục</label>
+            <div style="display:flex; gap:10px;">
+                <input type="text" id="folder-path" placeholder="Nhấn 'Chọn' để mở file browser..." readonly style="flex:1; cursor:pointer;" onclick="openFileBrowser()">
+                <button class="btn btn-secondary" id="btn-browse" onclick="openFileBrowser()">📂 Chọn</button>
+                <button class="btn btn-primary btn-sm" id="btn-scan" onclick="scanFolder()" disabled>Scan</button>
+            </div>
+        </div>
+
+        <!-- Scan Results -->
+        <div id="scan-results" class="hidden mt-4">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-sm text-muted" id="scan-count"></span>
+            </div>
+            <div id="scan-list"></div>
+        </div>
+
+        <!-- Empty state -->
+        <div id="scan-empty" class="empty-state">
+            <div class="icon">📂</div>
+            <div class="desc">Chọn thư mục chứa bài để bắt đầu</div>
+        </div>
+    </div>
+
+    <!-- Parse Button -->
+    <div class="mt-4" style="text-align:center;">
+        <button class="btn btn-primary btn-lg" id="btn-parse" onclick="startParse()" disabled>
+            🚀 BẮT ĐẦU PARSE
+        </button>
+    </div>
+
+    <!-- Loading overlay -->
+    <div id="parse-loading" class="hidden">
+        <div class="card mt-4">
+            <div class="loading-overlay">
+                <div class="spinner spinner-lg"></div>
+                <div class="loading-text" id="parse-status">Đang parse bài 1...</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- File Browser Modal -->
+<div class="modal-overlay" id="file-browser-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">📂 Chọn thư mục</span>
+            <button class="modal-close" onclick="closeFileBrowser()">✕</button>
+        </div>
+        <div class="modal-breadcrumb" id="browser-breadcrumb">
+            <button onclick="browseTo('')">💻 Drives</button>
+        </div>
+        <div class="modal-body" id="browser-list">
+            <div class="loading-overlay">
+                <div class="spinner"></div>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <span class="text-sm text-muted" id="browser-selected-path"></span>
+            <button class="btn btn-secondary btn-sm" onclick="closeFileBrowser()">Hủy</button>
+            <button class="btn btn-primary btn-sm" id="btn-select-folder" onclick="selectFolder()">✅ Chọn thư mục này</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── State ───
+let currentBrowsePath = '';
+let scanResults = [];
+
+// ─── Config: Load saved values ───
+(async function loadConfig() {
+    // Load from localStorage
+    const saved = JSON.parse(localStorage.getItem('polygon-uploader-config') || '{}');
+    if (saved.polygon_key) document.getElementById('polygon-key').value = saved.polygon_key;
+    if (saved.polygon_secret) document.getElementById('polygon-secret').value = saved.polygon_secret;
+    if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
+    if (saved.level) document.getElementById('level').value = saved.level;
+    if (saved.contest_name) document.getElementById('contest-name').value = saved.contest_name;
+    if (saved.start_index) document.getElementById('start-index').value = saved.start_index;
+    if (saved.lang) document.getElementById('lang').value = saved.lang;
+    if (saved.folder_path) {
+        document.getElementById('folder-path').value = saved.folder_path;
+        document.getElementById('btn-scan').disabled = false;
+    }
+})();
+
+function saveConfigLocal() {
+    const config = {
+        polygon_key: document.getElementById('polygon-key').value,
+        polygon_secret: document.getElementById('polygon-secret').value,
+        gemini_key: document.getElementById('gemini-key').value,
+        level: document.getElementById('level').value,
+        contest_name: document.getElementById('contest-name').value,
+        start_index: document.getElementById('start-index').value,
+        lang: document.getElementById('lang').value,
+        folder_path: document.getElementById('folder-path').value,
+    };
+    localStorage.setItem('polygon-uploader-config', JSON.stringify(config));
+}
+
+// ─── File Browser ───
+function openFileBrowser() {
+    document.getElementById('file-browser-modal').classList.add('active');
+    browseTo('');
+}
+
+function closeFileBrowser() {
+    document.getElementById('file-browser-modal').classList.remove('active');
+}
+
+async function browseTo(path) {
+    currentBrowsePath = path;
+    const listEl = document.getElementById('browser-list');
+    listEl.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+
+    // Update breadcrumb
+    updateBreadcrumb(path);
+
+    try {
+        const resp = await fetch('/api/browse?path=' + encodeURIComponent(path));
+        const data = await resp.json();
+
+        if (data.error) {
+            listEl.innerHTML = `<div class="empty-state"><div class="icon">⚠️</div><div class="desc">${data.error}</div></div>`;
+            return;
+        }
+
+        if (data.items.length === 0) {
+            listEl.innerHTML = '<div class="empty-state"><div class="icon">📭</div><div class="desc">Thư mục trống</div></div>';
+            return;
+        }
+
+        let html = '';
+        // Parent directory button
+        if (data.parent !== undefined && data.parent !== '' && path !== '') {
+            html += `<div class="file-list-item is-dir" onclick="browseTo('${escHtml(data.parent.replace(/\\/g, '\\\\'))}')">
+                <span class="icon">⬆️</span>
+                <span class="name">..</span>
+            </div>`;
+        }
+
+        for (const item of data.items) {
+            const escapedPath = escHtml(item.path.replace(/\\/g, '\\\\'));
+            if (item.is_dir) {
+                html += `<div class="file-list-item is-dir" onclick="browseTo('${escapedPath}')">
+                    <span class="icon">📁</span>
+                    <span class="name">${escHtml(item.name)}</span>
+                </div>`;
+            } else {
+                const size = formatSize(item.size);
+                html += `<div class="file-list-item">
+                    <span class="icon">📄</span>
+                    <span class="name">${escHtml(item.name)}</span>
+                    <span class="size">${size}</span>
+                </div>`;
+            }
+        }
+
+        listEl.innerHTML = html;
+        document.getElementById('browser-selected-path').textContent = path || 'Drives';
+    } catch (e) {
+        listEl.innerHTML = `<div class="empty-state"><div class="icon">❌</div><div class="desc">Lỗi: ${e.message}</div></div>`;
+    }
+}
+
+function updateBreadcrumb(path) {
+    const el = document.getElementById('browser-breadcrumb');
+    let html = '<button onclick="browseTo(\'\')">💻 Drives</button>';
+
+    if (path) {
+        // Split path into parts
+        const normalized = path.replace(/\\/g, '/');
+        const parts = normalized.split('/').filter(Boolean);
+        let accumulated = '';
+
+        for (let i = 0; i < parts.length; i++) {
+            accumulated += (i === 0 && parts[0].includes(':')) ? parts[i] + '\\' : (accumulated ? '\\' : '') + parts[i];
+            if (i === 0 && parts[0].includes(':')) {
+                // Drive letter
+            } else if (accumulated && !accumulated.endsWith('\\')) {
+                // Normal path
+            }
+            const fullPath = parts.slice(0, i + 1).join('\\');
+            // For drive letters like C:, make it C:\
+            const navPath = (i === 0 && parts[0].endsWith(':')) ? parts[0] + '\\' : fullPath;
+            html += `<span class="sep">›</span>`;
+            html += `<button onclick="browseTo('${escHtml(navPath.replace(/\\/g, '\\\\'))}')">${escHtml(parts[i])}</button>`;
+        }
+    }
+
+    el.innerHTML = html;
+}
+
+function selectFolder() {
+    if (currentBrowsePath) {
+        document.getElementById('folder-path').value = currentBrowsePath;
+        document.getElementById('btn-scan').disabled = false;
+        saveConfigLocal();
+    }
+    closeFileBrowser();
+}
+
+// ─── Scan ───
+async function scanFolder() {
+    const path = document.getElementById('folder-path').value;
+    if (!path) return;
+
+    saveConfigLocal();
+
+    const scanBtn = document.getElementById('btn-scan');
+    scanBtn.disabled = true;
+    scanBtn.textContent = '⏳';
+
+    try {
+        const resp = await fetch('/api/scan', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                path: path,
+                level: document.getElementById('level').value,
+                contest_name: document.getElementById('contest-name').value,
+                start_index: parseInt(document.getElementById('start-index').value) || 1,
+            }),
+        });
+
+        const data = await resp.json();
+
+        if (data.error) {
+            showToast(data.error, 'error');
+            return;
+        }
+
+        scanResults = data.results;
+        renderScanResults(scanResults);
+
+    } catch (e) {
+        showToast('Lỗi scan: ' + e.message, 'error');
+    } finally {
+        scanBtn.disabled = false;
+        scanBtn.textContent = 'Scan';
+    }
+}
+
+function renderScanResults(results) {
+    const container = document.getElementById('scan-results');
+    const list = document.getElementById('scan-list');
+    const empty = document.getElementById('scan-empty');
+    const parseBtn = document.getElementById('btn-parse');
+
+    if (results.length === 0) {
+        container.classList.add('hidden');
+        empty.classList.remove('hidden');
+        parseBtn.disabled = true;
+        return;
+    }
+
+    container.classList.remove('hidden');
+    empty.classList.add('hidden');
+    parseBtn.disabled = false;
+
+    document.getElementById('scan-count').textContent = `Detected: ${results.length} bài`;
+
+    let html = '';
+    for (const r of results) {
+        const icon = r.status === 'ok' ? '✅' : r.status === 'warning' ? '⚠️' : '❌';
+        const badgeClass = r.status === 'ok' ? 'badge-success' : r.status === 'warning' ? 'badge-warning' : 'badge-error';
+        const fileInfo = r.problem_files.map(f => f.ext).join(', ') || 'no file';
+
+        html += `<div class="problem-item">
+            <span class="problem-icon">${icon}</span>
+            <div class="problem-info">
+                <div class="problem-name">${escHtml(r.folder)} → ${escHtml(r.polygon_name)}</div>
+                <div class="problem-meta">${fileInfo}${r.solution_path ? ' • solution ✓' : ''}${r.tests_dir ? ' • tests ✓' : ''}${r.warning ? ' • ' + escHtml(r.warning) : ''}</div>
+            </div>
+            <span class="badge ${badgeClass}">${r.status}</span>
+        </div>`;
+    }
+
+    list.innerHTML = html;
+}
+
+// ─── Parse ───
+async function startParse() {
+    if (scanResults.length === 0) return;
+
+    // Save config to server
+    await saveConfigToServer();
+
+    const parseBtn = document.getElementById('btn-parse');
+    parseBtn.disabled = true;
+
+    const loading = document.getElementById('parse-loading');
+    loading.classList.remove('hidden');
+
+    try {
+        const total = scanResults.length;
+
+        for (let i = 0; i < total; i++) {
+            const scan = scanResults[i];
+            document.getElementById('parse-status').textContent =
+                `Đang parse bài ${i + 1}/${total}: ${scan.folder}...`;
+
+            if (scan.status === 'error') continue;
+
+            try {
+                await fetch(`/api/parse/${i}`, { method: 'POST' });
+            } catch (e) {
+                console.error(`Parse error for ${scan.folder}:`, e);
+            }
+        }
+
+        // Redirect to preview
+        window.location.href = '/preview';
+
+    } catch (e) {
+        showToast('Lỗi parse: ' + e.message, 'error');
+        parseBtn.disabled = false;
+        loading.classList.add('hidden');
+    }
+}
+
+async function saveConfigToServer() {
+    await fetch('/api/save-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            polygon_api_key: document.getElementById('polygon-key').value,
+            polygon_secret: document.getElementById('polygon-secret').value,
+            gemini_api_key: document.getElementById('gemini-key').value,
+            lang: document.getElementById('lang').value,
+            level: document.getElementById('level').value,
+            contest_name: document.getElementById('contest-name').value,
+            start_index: parseInt(document.getElementById('start-index').value) || 1,
+        }),
+    });
+    saveConfigLocal();
+}
+
+// ─── Utils ───
+function escHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function formatSize(bytes) {
+    if (bytes === 0) return '';
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+</script>
+
+</body>
+</html>

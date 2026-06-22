@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Polygon Uploader — Preview</title>
+    <meta name="description" content="Preview và chỉnh sửa đề bài trước khi upload">
+    <link rel="stylesheet" href="/static/style.css">
+    <!-- KaTeX -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"></script>
+</head>
+<body>
+
+<div class="app-container wide">
+    <!-- Header -->
+    <header class="app-header">
+        <div class="app-logo">🔷</div>
+        <div style="flex:1">
+            <h1 class="app-title">Preview & Edit</h1>
+            <p class="app-subtitle">Xem trước và chỉnh sửa đề bài</p>
+        </div>
+        <a href="/" class="btn btn-ghost">← Quay lại</a>
+    </header>
+
+    <!-- Loading -->
+    <div id="loading-state" class="card">
+        <div class="loading-overlay">
+            <div class="spinner spinner-lg"></div>
+            <div class="loading-text">Đang tải danh sách bài...</div>
+        </div>
+    </div>
+
+    <!-- Empty state -->
+    <div id="empty-state" class="card hidden">
+        <div class="empty-state">
+            <div class="icon">📭</div>
+            <div class="title">Chưa có bài nào được parse</div>
+            <div class="desc">Quay lại trang Config để scan và parse bài</div>
+            <div class="mt-4">
+                <a href="/" class="btn btn-primary">← Quay lại Config</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main content -->
+    <div id="main-content" class="hidden">
+        <!-- Navigation bar -->
+        <div class="nav-bar">
+            <div class="nav-info">
+                <span class="folder-name" id="nav-folder">bai1</span>
+                <span class="counter" id="nav-counter">(1 / 3)</span>
+            </div>
+            <div class="btn-group">
+                <button class="btn btn-ghost btn-sm" id="btn-prev" onclick="navigate(-1)">◀ Trước</button>
+                <button class="btn btn-ghost btn-sm" id="btn-next" onclick="navigate(1)">Sau ▶</button>
+            </div>
+        </div>
+
+        <!-- Split editor panel -->
+        <div class="split-panel" id="editor-panel">
+            <div class="split-left">
+                <div class="panel-header">✏️ LaTeX Editor</div>
+                <div class="panel-body">
+                    <textarea id="latex-editor" placeholder="Nhập nội dung LaTeX..."></textarea>
+                </div>
+            </div>
+            <div class="split-right">
+                <div class="panel-header">👁️ Preview (KaTeX)</div>
+                <div class="panel-body">
+                    <div class="katex-preview" id="katex-preview">
+                        <p class="text-muted">Preview sẽ hiện ở đây...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Problem metadata -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <div class="card-icon amber">⚙️</div>
+                <div class="card-title">Problem Settings</div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit-name">Polygon Name</label>
+                    <input type="text" id="edit-name" placeholder="vd: lv1 - array - 01">
+                </div>
+                <div class="form-group">
+                    <label for="edit-title">Title</label>
+                    <input type="text" id="edit-title" placeholder="Tên bài">
+                </div>
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit-time">Time Limit (ms)</label>
+                    <input type="number" id="edit-time" value="1000" min="250" max="15000" step="50">
+                </div>
+                <div class="form-group">
+                    <label for="edit-memory">Memory Limit (MB)</label>
+                    <input type="number" id="edit-memory" value="256" min="4" max="1024">
+                </div>
+                <div class="form-group">
+                    <label for="edit-checker">Checker</label>
+                    <select id="edit-checker">
+                        <option value="std::wcmp">std::wcmp (token)</option>
+                        <option value="std::ncmp">std::ncmp (số nguyên)</option>
+                        <option value="std::fcmp">std::fcmp (chính xác)</option>
+                        <option value="std::rcmp4">std::rcmp4 (thực 10⁻⁴)</option>
+                        <option value="std::rcmp6">std::rcmp6 (thực 10⁻⁶)</option>
+                        <option value="std::rcmp9">std::rcmp9 (thực 10⁻⁹)</option>
+                        <option value="std::yesno">std::yesno</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Input/Output Format -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <div class="card-icon blue">📝</div>
+                <div class="card-title">Input / Output Format</div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="edit-input">Input Format (LaTeX)</label>
+                    <textarea id="edit-input" rows="3" style="min-height:80px"></textarea>
+                </div>
+                <div class="form-group">
+                    <label for="edit-output">Output Format (LaTeX)</label>
+                    <textarea id="edit-output" rows="3" style="min-height:80px"></textarea>
+                </div>
+            </div>
+            <div class="form-group">
+                <label for="edit-notes">Notes (LaTeX, tùy chọn)</label>
+                <textarea id="edit-notes" rows="2" style="min-height:60px" placeholder="Ghi chú thêm..."></textarea>
+            </div>
+        </div>
+
+        <!-- Examples -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <div class="card-icon green">📋</div>
+                <div>
+                    <div class="card-title">Examples</div>
+                    <div class="card-desc" id="example-count">0 examples</div>
+                </div>
+                <div style="margin-left:auto">
+                    <button class="btn btn-ghost btn-sm" onclick="addExample()">+ Thêm</button>
+                </div>
+            </div>
+            <div id="examples-container"></div>
+        </div>
+
+        <!-- Solution & Tests info -->
+        <div class="card mt-4" id="files-card">
+            <div class="card-header">
+                <div class="card-icon blue">📎</div>
+                <div class="card-title">Files</div>
+            </div>
+            <div id="files-info" class="text-sm text-muted"></div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="actions-bar">
+            <button class="btn btn-ghost" onclick="skipProblem()">⏭ Skip</button>
+            <button class="btn btn-success" onclick="confirmProblem()">✅ Confirm</button>
+            <button class="btn btn-warning" onclick="uploadAll()">⚡ Upload tất cả & bỏ qua preview</button>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── State ───
+let problems = [];
+let currentIdx = 0;
+let currentEditingField = 'statement'; // which field the LaTeX editor is editing
+
+// ─── Load problems ───
+(async function init() {
+    try {
+        const resp = await fetch('/api/problems');
+        const data = await resp.json();
+
+        document.getElementById('loading-state').classList.add('hidden');
+
+        if (!data.problems || data.problems.length === 0) {
+            document.getElementById('empty-state').classList.remove('hidden');
+            return;
+        }
+
+        problems = data.problems;
+        document.getElementById('main-content').classList.remove('hidden');
+        showProblem(0);
+
+    } catch (e) {
+        document.getElementById('loading-state').innerHTML =
+            `<div class="empty-state"><div class="icon">❌</div><div class="desc">Lỗi: ${e.message}</div></div>`;
+    }
+})();
+
+// ─── Render KaTeX ───
+function renderKatex() {
+    const el = document.getElementById('katex-preview');
+    if (typeof renderMathInElement === 'function') {
+        renderMathInElement(el, {
+            delimiters: [
+                {left: '$$', right: '$$', display: true},
+                {left: '$', right: '$', display: false},
+                {left: '\\[', right: '\\]', display: true},
+                {left: '\\(', right: '\\)', display: false},
+            ],
+            throwOnError: false,
+        });
+    }
+}
+
+// ─── Show problem ───
+function showProblem(idx) {
+    if (idx < 0 || idx >= problems.length) return;
+    currentIdx = idx;
+
+    const entry = problems[idx];
+    const prob = entry.problem;
+    const scan = entry.scan || {};
+
+    // Nav
+    document.getElementById('nav-folder').textContent = scan.folder || `Bài ${idx + 1}`;
+    document.getElementById('nav-counter').textContent = `(${idx + 1} / ${problems.length})`;
+    document.getElementById('btn-prev').disabled = idx === 0;
+    document.getElementById('btn-next').disabled = idx === problems.length - 1;
+
+    // Status indicator
+    const statusBadge = entry.status === 'confirmed' ? ' ✅' : entry.status === 'skipped' ? ' ⏭' : '';
+    document.getElementById('nav-folder').textContent = (scan.folder || `Bài ${idx + 1}`) + statusBadge;
+
+    // Metadata
+    document.getElementById('edit-name').value = prob.polygon_name || '';
+    document.getElementById('edit-title').value = prob.title || '';
+    document.getElementById('edit-time').value = prob.time_limit || 1000;
+    document.getElementById('edit-memory').value = prob.memory_limit || 256;
+    document.getElementById('edit-checker').value = prob.checker || 'std::wcmp';
+
+    // Statement → LaTeX editor
+    document.getElementById('latex-editor').value = prob.statement || '';
+    updatePreview();
+
+    // Input/Output/Notes
+    document.getElementById('edit-input').value = prob.input_format || '';
+    document.getElementById('edit-output').value = prob.output_format || '';
+    document.getElementById('edit-notes').value = prob.notes || '';
+
+    // Examples
+    renderExamples(prob.examples || []);
+
+    // Files info
+    const filesInfo = [];
+    if (prob.solution_path) filesInfo.push(`📄 Solution: ${prob.solution_path.split(/[\\/]/).pop()}`);
+    if (prob.tests_dir) filesInfo.push(`📁 Tests: ${prob.tests_dir.split(/[\\/]/).pop()}/`);
+    if (filesInfo.length === 0) filesInfo.push('Không có solution hoặc tests');
+    document.getElementById('files-info').innerHTML = filesInfo.join('<br>');
+}
+
+function updatePreview() {
+    const text = document.getElementById('latex-editor').value;
+    const preview = document.getElementById('katex-preview');
+
+    // Convert LaTeX to HTML-friendly format
+    let html = text
+        .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+        .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
+        .replace(/\\\\|\n\n/g, '</p><p>')
+        .replace(/\n/g, '<br>');
+
+    preview.innerHTML = '<p>' + html + '</p>';
+    renderKatex();
+}
+
+// Debounced editor input
+let editorTimeout;
+document.addEventListener('DOMContentLoaded', () => {
+    const editor = document.getElementById('latex-editor');
+    if (editor) {
+        editor.addEventListener('input', () => {
+            clearTimeout(editorTimeout);
+            editorTimeout = setTimeout(updatePreview, 300);
+        });
+    }
+});
+
+// ─── Examples ───
+function renderExamples(examples) {
+    const container = document.getElementById('examples-container');
+    document.getElementById('example-count').textContent = `${examples.length} example(s)`;
+
+    if (examples.length === 0) {
+        container.innerHTML = '<div class="text-sm text-muted" style="padding:12px">Chưa có example</div>';
+        return;
+    }
+
+    let html = '';
+    for (let i = 0; i < examples.length; i++) {
+        html += `<div class="problem-item" style="flex-direction:column; align-items:stretch; gap:8px;">
+            <div class="flex items-center justify-between">
+                <span class="text-sm" style="font-weight:600">Example ${i + 1}</span>
+                <button class="btn btn-ghost btn-sm" onclick="removeExample(${i})" style="color:var(--error)">✕</button>
+            </div>
+            <div class="form-row" style="gap:8px">
+                <div class="form-group" style="margin:0">
+                    <label style="font-size:11px">Input</label>
+                    <textarea class="font-mono example-input" data-idx="${i}" rows="3" style="min-height:60px; font-size:13px">${escHtml(examples[i].input)}</textarea>
+                </div>
+                <div class="form-group" style="margin:0">
+                    <label style="font-size:11px">Output</label>
+                    <textarea class="font-mono example-output" data-idx="${i}" rows="3" style="min-height:60px; font-size:13px">${escHtml(examples[i].output)}</textarea>
+                </div>
+            </div>
+        </div>`;
+    }
+    container.innerHTML = html;
+}
+
+function addExample() {
+    const prob = problems[currentIdx].problem;
+    if (!prob.examples) prob.examples = [];
+    prob.examples.push({ input: '', output: '' });
+    renderExamples(prob.examples);
+}
+
+function removeExample(i) {
+    const prob = problems[currentIdx].problem;
+    prob.examples.splice(i, 1);
+    renderExamples(prob.examples);
+}
+
+// ─── Navigation ───
+function navigate(delta) {
+    saveCurrent();
+    showProblem(currentIdx + delta);
+}
+
+// ─── Save current edits ───
+function saveCurrent() {
+    if (!problems[currentIdx]) return;
+
+    const prob = problems[currentIdx].problem;
+    prob.polygon_name = document.getElementById('edit-name').value;
+    prob.title = document.getElementById('edit-title').value;
+    prob.time_limit = parseInt(document.getElementById('edit-time').value) || 1000;
+    prob.memory_limit = parseInt(document.getElementById('edit-memory').value) || 256;
+    prob.checker = document.getElementById('edit-checker').value;
+    prob.statement = document.getElementById('latex-editor').value;
+    prob.input_format = document.getElementById('edit-input').value;
+    prob.output_format = document.getElementById('edit-output').value;
+    prob.notes = document.getElementById('edit-notes').value;
+
+    // Save examples from textareas
+    const inputs = document.querySelectorAll('.example-input');
+    const outputs = document.querySelectorAll('.example-output');
+    prob.examples = [];
+    for (let i = 0; i < inputs.length; i++) {
+        prob.examples.push({
+            input: inputs[i].value,
+            output: outputs[i].value,
+        });
+    }
+}
+
+// ─── Actions ───
+async function confirmProblem() {
+    saveCurrent();
+    const prob = problems[currentIdx].problem;
+
+    try {
+        await fetch(`/api/problems/${problems[currentIdx].index}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...prob, status: 'confirmed' }),
+        });
+        problems[currentIdx].status = 'confirmed';
+        showToast('✅ Đã confirm bài ' + prob.polygon_name, 'success');
+
+        // Auto-navigate to next
+        if (currentIdx < problems.length - 1) {
+            navigate(1);
+        } else {
+            // All done, ask to proceed
+            if (confirm('Đã review xong tất cả bài! Chuyển sang upload?')) {
+                window.location.href = '/progress';
+            }
+        }
+    } catch (e) {
+        showToast('Lỗi: ' + e.message, 'error');
+    }
+}
+
+async function skipProblem() {
+    saveCurrent();
+
+    try {
+        await fetch(`/api/problems/${problems[currentIdx].index}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'skipped' }),
+        });
+        problems[currentIdx].status = 'skipped';
+
+        if (currentIdx < problems.length - 1) {
+            navigate(1);
+        }
+    } catch (e) {
+        showToast('Lỗi: ' + e.message, 'error');
+    }
+}
+
+async function uploadAll() {
+    // Confirm all remaining unconfirmed problems
+    for (let i = 0; i < problems.length; i++) {
+        if (problems[i].status !== 'skipped' && problems[i].status !== 'confirmed') {
+            currentIdx = i;
+            saveCurrent();
+            const prob = problems[i].problem;
+            await fetch(`/api/problems/${problems[i].index}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ...prob, status: 'confirmed' }),
+            });
+            problems[i].status = 'confirmed';
+        }
+    }
+    window.location.href = '/progress';
+}
+
+// ─── Utils ───
+function escHtml(str) {
+    if (!str) return '';
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function showToast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 3000);
+}
+</script>
+
+</body>
+</html>
