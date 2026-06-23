@@ -24,7 +24,7 @@
         <div class="card-header">
             <div class="card-icon blue">🔑</div>
             <div>
-                <div class="card-title">Polygon API</div>
+                <div class="card-title">Polygon API <span id="polygon-status" class="badge badge-info" style="display:none"></span></div>
                 <div class="card-desc">API key từ polygon.codeforces.com → Settings</div>
             </div>
         </div>
@@ -40,18 +40,28 @@
         </div>
     </div>
 
-    <!-- Gemini API Config -->
     <div class="card" id="card-gemini">
         <div class="card-header">
             <div class="card-icon green">🤖</div>
             <div>
-                <div class="card-title">Gemini API</div>
+                <div class="card-title">Gemini API <span id="gemini-status" class="badge badge-info" style="display:none"></span></div>
                 <div class="card-desc">API key từ aistudio.google.com</div>
             </div>
         </div>
-        <div class="form-group">
-            <label for="gemini-key">API Key</label>
-            <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
+        <div class="form-row">
+            <div class="form-group" style="flex:2">
+                <label for="gemini-key">API Key</label>
+                <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
+            </div>
+            <div class="form-group" style="flex:1">
+                <label for="gemini-model">Model</label>
+                <select id="gemini-model">
+                    <option value="gemini-2.0-flash">⚡ 2.0 Flash</option>
+                    <option value="gemini-2.0-flash-lite">🪶 2.0 Flash Lite (nhẹ hơn)</option>
+                    <option value="gemini-2.5-flash">🚀 2.5 Flash</option>
+                    <option value="gemini-1.5-flash">📦 1.5 Flash</option>
+                </select>
+            </div>
         </div>
     </div>
 
@@ -175,19 +185,67 @@ let scanResults = [];
 
 // ─── Config: Load saved values ───
 (async function loadConfig() {
-    // Load from localStorage
+    // 1) Load non-secret fields from localStorage
     const saved = JSON.parse(localStorage.getItem('polygon-uploader-config') || '{}');
-    if (saved.polygon_key) document.getElementById('polygon-key').value = saved.polygon_key;
-    if (saved.polygon_secret) document.getElementById('polygon-secret').value = saved.polygon_secret;
-    if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
     if (saved.level) document.getElementById('level').value = saved.level;
     if (saved.contest_name) document.getElementById('contest-name').value = saved.contest_name;
     if (saved.start_index) document.getElementById('start-index').value = saved.start_index;
     if (saved.lang) document.getElementById('lang').value = saved.lang;
+    if (saved.gemini_model) document.getElementById('gemini-model').value = saved.gemini_model;
     if (saved.folder_path) {
         document.getElementById('folder-path').value = saved.folder_path;
         document.getElementById('btn-scan').disabled = false;
     }
+
+    // 2) Fetch server config to check which keys are already set from .env
+    try {
+        const resp = await fetch('/api/config');
+        const config = await resp.json();
+
+        // Non-secret fields from server (as fallback)
+        if (!saved.level && config.level) document.getElementById('level').value = config.level;
+        if (!saved.contest_name && config.contest_name) document.getElementById('contest-name').value = config.contest_name;
+        if (config.start_index && !saved.start_index) document.getElementById('start-index').value = config.start_index;
+        if (!saved.lang && config.lang) document.getElementById('lang').value = config.lang;
+        if (!saved.gemini_model && config.gemini_model) document.getElementById('gemini-model').value = config.gemini_model;
+
+        // Show key status from .env
+        const polygonStatus = document.getElementById('polygon-status');
+        if (config.polygon_api_key_set && config.polygon_secret_set) {
+            polygonStatus.textContent = '✅ Đã cấu hình từ .env';
+            polygonStatus.className = 'badge badge-success';
+            polygonStatus.style.display = 'inline-flex';
+            document.getElementById('polygon-key').placeholder = config.polygon_api_key_display || '●●●●●●';
+            document.getElementById('polygon-secret').placeholder = config.polygon_secret_display || '●●●●●●';
+        } else if (config.polygon_api_key_set || config.polygon_secret_set) {
+            polygonStatus.textContent = '⚠️ Thiếu key';
+            polygonStatus.className = 'badge badge-warning';
+            polygonStatus.style.display = 'inline-flex';
+        }
+
+        const geminiStatus = document.getElementById('gemini-status');
+        if (config.gemini_api_key_set) {
+            geminiStatus.textContent = '✅ Đã cấu hình từ .env';
+            geminiStatus.className = 'badge badge-success';
+            geminiStatus.style.display = 'inline-flex';
+            document.getElementById('gemini-key').placeholder = config.gemini_api_key_display || '●●●●●●';
+        }
+
+        // Store server config status
+        window._serverKeyStatus = {
+            polygon_api_key_set: config.polygon_api_key_set,
+            polygon_secret_set: config.polygon_secret_set,
+            gemini_api_key_set: config.gemini_api_key_set,
+        };
+
+    } catch (e) {
+        console.warn('Could not fetch server config:', e);
+    }
+
+    // 3) If localStorage has keys (user entered before), fill them
+    if (saved.polygon_key) document.getElementById('polygon-key').value = saved.polygon_key;
+    if (saved.polygon_secret) document.getElementById('polygon-secret').value = saved.polygon_secret;
+    if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
 })();
 
 function saveConfigLocal() {
@@ -195,6 +253,7 @@ function saveConfigLocal() {
         polygon_key: document.getElementById('polygon-key').value,
         polygon_secret: document.getElementById('polygon-secret').value,
         gemini_key: document.getElementById('gemini-key').value,
+        gemini_model: document.getElementById('gemini-model').value,
         level: document.getElementById('level').value,
         contest_name: document.getElementById('contest-name').value,
         start_index: document.getElementById('start-index').value,
@@ -398,6 +457,10 @@ async function startParse() {
     const loading = document.getElementById('parse-loading');
     loading.classList.remove('hidden');
 
+    let successCount = 0;
+    let errorCount = 0;
+    let errors = [];
+
     try {
         const total = scanResults.length;
 
@@ -408,15 +471,68 @@ async function startParse() {
 
             if (scan.status === 'error') continue;
 
+            // Add delay between API calls to avoid rate limiting
+            if (i > 0) {
+                document.getElementById('parse-status').textContent =
+                    `Đợi 2s trước bài ${i + 1}/${total}...`;
+                await new Promise(r => setTimeout(r, 2000));
+                document.getElementById('parse-status').textContent =
+                    `Đang parse bài ${i + 1}/${total}: ${scan.folder}...`;
+            }
+
             try {
-                await fetch(`/api/parse/${i}`, { method: 'POST' });
+                const resp = await fetch(`/api/parse/${i}`, { method: 'POST' });
+                const result = await resp.json();
+
+                if (result.status === 'error') {
+                    errorCount++;
+                    errors.push({ folder: scan.folder, error: result.error });
+                    console.error(`[parse ${i}] ${scan.folder}: ${result.error}`);
+
+                    // If rate limited, wait extra before next call
+                    if (result.error && result.error.includes('Rate limit')) {
+                        document.getElementById('parse-status').textContent =
+                            `⏳ Rate limit — đợi 30s trước bài tiếp theo...`;
+                        await new Promise(r => setTimeout(r, 30000));
+                    }
+                } else {
+                    successCount++;
+                }
             } catch (e) {
+                errorCount++;
+                errors.push({ folder: scan.folder, error: e.message });
                 console.error(`Parse error for ${scan.folder}:`, e);
             }
         }
 
-        // Redirect to preview
-        window.location.href = '/preview';
+        // Show summary before redirecting
+        if (errorCount > 0) {
+            document.getElementById('parse-status').textContent =
+                `Parse xong: ${successCount} thành công, ${errorCount} lỗi`;
+
+            // Show error details
+            let errorHtml = '<div style="margin-top:16px; text-align:left;">';
+            errorHtml += '<div style="font-weight:600; margin-bottom:8px; color:var(--error)">⚠️ Lỗi parse chi tiết:</div>';
+            for (const err of errors) {
+                errorHtml += `<div class="problem-item" style="border-color:var(--error)">
+                    <span class="problem-icon">❌</span>
+                    <div class="problem-info">
+                        <div class="problem-name">${escHtml(err.folder)}</div>
+                        <div class="problem-meta" style="color:var(--error)">${escHtml(err.error)}</div>
+                    </div>
+                </div>`;
+            }
+            errorHtml += '<div style="margin-top:16px; text-align:center;">';
+            errorHtml += '<button class="btn btn-primary" onclick="window.location.href=\'/preview\'">Tiếp tục → Preview</button> ';
+            errorHtml += '<button class="btn btn-secondary" onclick="location.reload()">Thử lại</button>';
+            errorHtml += '</div></div>';
+
+            document.querySelector('#parse-loading .card').innerHTML =
+                document.querySelector('#parse-loading .card').innerHTML + errorHtml;
+        } else {
+            // All success → redirect immediately
+            window.location.href = '/preview';
+        }
 
     } catch (e) {
         showToast('Lỗi parse: ' + e.message, 'error');
@@ -426,13 +542,19 @@ async function startParse() {
 }
 
 async function saveConfigToServer() {
+    // Only send keys that user actually entered (not empty = keep server's .env value)
+    const polygonKey = document.getElementById('polygon-key').value;
+    const polygonSecret = document.getElementById('polygon-secret').value;
+    const geminiKey = document.getElementById('gemini-key').value;
+
     await fetch('/api/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            polygon_api_key: document.getElementById('polygon-key').value,
-            polygon_secret: document.getElementById('polygon-secret').value,
-            gemini_api_key: document.getElementById('gemini-key').value,
+            polygon_api_key: polygonKey,   // empty string = server keeps existing
+            polygon_secret: polygonSecret,
+            gemini_api_key: geminiKey,
+            gemini_model: document.getElementById('gemini-model').value,
             lang: document.getElementById('lang').value,
             level: document.getElementById('level').value,
             contest_name: document.getElementById('contest-name').value,

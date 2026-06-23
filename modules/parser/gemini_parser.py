@@ -3,7 +3,9 @@ Gemini Vision API parser — sends problem files (as images/text)
 to Gemini and parses the structured JSON response into a Problem model.
 """
 
+import asyncio
 import json
+import logging
 import re
 from typing import Optional
 
@@ -12,6 +14,12 @@ from google.genai import types
 
 from modules.parser.file_loader import FileContent
 from modules.parser.models import Example, Problem
+
+logger = logging.getLogger("polygon-uploader.parser")
+
+# Retry config for rate-limited API calls
+MAX_RETRIES = 3
+RETRY_DELAYS = [10, 30, 60]  # seconds — escalating backoff
 
 # System prompt for Gemini (from design doc)
 PARSE_PROMPT = """Bạn là trợ lý phân tích đề bài lập trình thi đấu.
@@ -40,6 +48,38 @@ Lưu ý:
 - output_format mô tả định dạng output
 - notes chứa ghi chú thêm (nếu có), để "" nếu không có
 - examples là danh sách các ví dụ input/output"""
+
+
+def _format_api_error(error: Exception) -> str:
+    """Extract a short, human-readable error message from Gemini API errors."""
+    err_str = str(error)
+
+    # Rate limit
+    if "429" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+        return "Rate limit — hết quota Gemini API. Đợi 1 phút rồi thử lại."
+
+    # Auth errors
+    if "401" in err_str or "UNAUTHENTICATED" in err_str:
+        return "API key không hợp lệ. Kiểm tra lại Gemini API key."
+
+    if "403" in err_str or "PERMISSION_DENIED" in err_str:
+        return "Không có quyền truy cập API. Kiểm tra key hoặc bật Gemini API."
+
+    # Content safety
+    if "SAFETY" in err_str or "blocked" in err_str.lower():
+        return "Nội dung bị chặn bởi bộ lọc an toàn của Gemini."
+
+    # Generic — truncate to readable length
+    if len(err_str) > 200:
+        return err_str[:200] + "..."
+
+    return err_str
+
+
+def _is_retryable(error: Exception) -> bool:
+    """Check if an error is a rate limit that can be retried."""
+    err_str = str(error)
+    return "429" in err_str or "RESOURCE_EXHAUSTED" in err_str
 
 
 def _extract_json(text: str) -> dict:
@@ -86,6 +126,8 @@ async def parse_problem(
     """
     Send file content to Gemini Vision and parse the response.
 
+    Includes automatic retry with exponential backoff for rate limit errors (429).
+
     Args:
         content: FileContent from file_loader (images + optional text).
         api_key: Gemini API key.
@@ -121,19 +163,52 @@ async def parse_problem(
     # Add instruction prompt last
     parts.append(PARSE_PROMPT)
 
-    try:
-        response = await client.aio.models.generate_content(
-            model=model,
-            contents=parts,
-        )
-        raw_text = response.text
-    except Exception as e:
-        raise ValueError(f"Lỗi gọi Gemini API: {e}")
+    # Call Gemini with retry for rate limits
+    raw_text = None
+    last_error = None
+
+    for attempt in range(MAX_RETRIES + 1):
+        try:
+            logger.info(
+                "Gọi Gemini model=%s, parts=%d (images=%d, has_text=%s)%s",
+                model, len(parts), len(content.images), bool(content.text),
+                f" [retry {attempt}]" if attempt > 0 else "",
+            )
+            response = await client.aio.models.generate_content(
+                model=model,
+                contents=parts,
+            )
+            raw_text = response.text
+            logger.info("Gemini response OK — length=%d chars", len(raw_text))
+            logger.debug("Gemini raw response:\n%s", raw_text[:2000])
+            break  # Success — exit retry loop
+
+        except Exception as e:
+            last_error = e
+            short_err = _format_api_error(e)
+            logger.warning("Gemini API error (attempt %d/%d): %s",
+                           attempt + 1, MAX_RETRIES + 1, short_err)
+
+            # Retry only for rate limits, and only if we have retries left
+            if _is_retryable(e) and attempt < MAX_RETRIES:
+                delay = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)]
+                logger.info("⏳ Rate limited — đợi %ds trước khi retry...", delay)
+                await asyncio.sleep(delay)
+                continue
+
+            # Non-retryable or out of retries
+            logger.error("Lỗi gọi Gemini API: %s", short_err, exc_info=True)
+            raise ValueError(f"Lỗi gọi Gemini API: {short_err}")
+
+    if raw_text is None:
+        raise ValueError(f"Lỗi gọi Gemini API: {_format_api_error(last_error)}")
 
     # Parse JSON response
     try:
         data = _extract_json(raw_text)
+        logger.info("JSON extracted OK — keys: %s", list(data.keys()))
     except ValueError:
+        logger.warning("Không thể parse JSON từ Gemini response. Raw text (first 500):\n%s", raw_text[:500])
         # Fallback: return empty problem for user to fill manually
         return Problem(title=f"[Parse failed] {content.source_name}")
 

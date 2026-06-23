@@ -21,8 +21,10 @@ Routes:
 
 import asyncio
 import json
+import logging
 import os
 import string
+import traceback
 from pathlib import Path
 from typing import Optional
 
@@ -42,6 +44,15 @@ from modules.polygon.uploader import upload_problem
 # ─── App ──────────────────────────────────────────────
 
 load_dotenv()
+
+# ─── Logging ──────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("polygon-uploader")
+
 app = FastAPI(title="Polygon Uploader", version="1.0.0")
 
 FRONTEND_DIR = Path(__file__).parent / "frontend"
@@ -72,6 +83,7 @@ async def startup():
         "polygon_api_key": os.getenv("POLYGON_API_KEY", ""),
         "polygon_secret": os.getenv("POLYGON_SECRET", ""),
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
+        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         "lang": "vietnamese",
         "level": "lv1",
         "contest_name": "",
@@ -104,18 +116,22 @@ app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
 
 @app.get("/api/config")
 async def get_config():
-    """Return current config with secrets masked."""
+    """Return current config with masked secrets + status flags."""
     c = dict(state.config)
+
+    # Mask secrets for display, but tell frontend they exist
     for key in ("polygon_api_key", "polygon_secret", "gemini_api_key"):
         val = c.get(key, "")
         if len(val) > 8:
-            c[key] = val[:4] + "●" * (len(val) - 8) + val[-4:]
+            c[key + "_display"] = val[:4] + "●" * (len(val) - 8) + val[-4:]
         elif val:
-            c[key] = "●" * len(val)
-    # Send raw values too for pre-filling form (client stores them locally)
-    c["has_polygon_key"] = bool(state.config.get("polygon_api_key"))
-    c["has_polygon_secret"] = bool(state.config.get("polygon_secret"))
-    c["has_gemini_key"] = bool(state.config.get("gemini_api_key"))
+            c[key + "_display"] = "●" * len(val)
+        else:
+            c[key + "_display"] = ""
+        c[key + "_set"] = bool(val)
+        # Don't send raw key values to frontend
+        c.pop(key, None)
+
     return c
 
 
@@ -123,6 +139,7 @@ class SaveConfigRequest(BaseModel):
     polygon_api_key: str = ""
     polygon_secret: str = ""
     gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.0-flash"
     lang: str = "vietnamese"
     level: str = "lv1"
     contest_name: str = ""
@@ -139,6 +156,7 @@ async def save_config(req: SaveConfigRequest):
     if req.gemini_api_key:
         state.config["gemini_api_key"] = req.gemini_api_key
 
+    state.config["gemini_model"] = req.gemini_model
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
@@ -253,15 +271,33 @@ async def parse_single(idx: int):
         file_path = scan["problem_files"][0]["path"]
 
     if not file_path:
+        logger.warning("[parse %d] Không có file đề cho %s", idx, scan["folder"])
         return JSONResponse({"error": "Không có file đề"}, status_code=400)
 
     gemini_key = state.config.get("gemini_api_key", "")
     if not gemini_key:
+        logger.error("[parse %d] Gemini API key chưa được cấu hình!", idx)
         return JSONResponse({"error": "Chưa cấu hình Gemini API key"}, status_code=400)
 
+    logger.info("[parse %d] Bắt đầu parse: %s (file: %s)", idx, scan["folder"], file_path)
+
     try:
+        # Step 1: Load file
+        logger.info("[parse %d] Loading file...", idx)
         content = load_file(Path(file_path))
-        problem = await parse_problem(content, gemini_key)
+        logger.info(
+            "[parse %d] File loaded OK — %d image(s), text: %d chars",
+            idx, len(content.images), len(content.text),
+        )
+
+        # Step 2: Call Gemini
+        gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
+        logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
+        problem = await parse_problem(content, gemini_key, model=gemini_model)
+        logger.info(
+            "[parse %d] ✅ Parse thành công — title: %s, %d example(s)",
+            idx, problem.title, len(problem.examples),
+        )
 
         # Apply scan metadata
         problem.polygon_name = scan["polygon_name"]
@@ -275,7 +311,11 @@ async def parse_single(idx: int):
         }
 
         return {"status": "ok", "problem": problem.model_dump()}
+
     except Exception as e:
+        error_detail = traceback.format_exc()
+        logger.error("[parse %d] ❌ Lỗi parse: %s\n%s", idx, e, error_detail)
+
         # Store empty problem on error
         empty = Problem(
             polygon_name=scan["polygon_name"],
@@ -291,7 +331,7 @@ async def parse_single(idx: int):
         }
         return JSONResponse(
             {"status": "error", "error": str(e), "problem": empty.model_dump()},
-            status_code=200,  # Still 200, client handles error status
+            status_code=200,
         )
 
 

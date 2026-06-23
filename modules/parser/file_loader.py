@@ -10,11 +10,18 @@ Strategy (per user request):
 """
 
 import io
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import fitz  # PyMuPDF
 from PIL import Image, ImageDraw, ImageFont
+
+logger = logging.getLogger("polygon-uploader.loader")
+
+# Max image width for Gemini (pixels) — larger images waste tokens
+MAX_IMAGE_WIDTH = 1200
+JPEG_QUALITY = 80  # Compression quality (0-100)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".doc", ".png", ".jpg", ".jpeg"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -57,13 +64,21 @@ def load_file(path: Path) -> FileContent:
 
 
 def _load_pdf(path: Path) -> FileContent:
-    """Render each PDF page to a PNG image at 200 DPI."""
+    """Render each PDF page to a compressed JPEG at 150 DPI."""
     images = []
     doc = fitz.open(str(path))
     try:
-        for page in doc:
-            pix = page.get_pixmap(dpi=200)
-            images.append(pix.tobytes("png"))
+        for page_num, page in enumerate(doc):
+            pix = page.get_pixmap(dpi=150)
+            raw_png = pix.tobytes("png")
+            compressed = _compress_image(raw_png)
+            logger.info(
+                "PDF page %d: %d KB → %d KB (compressed)",
+                page_num + 1,
+                len(raw_png) // 1024,
+                len(compressed) // 1024,
+            )
+            images.append(compressed)
     finally:
         doc.close()
 
@@ -71,20 +86,16 @@ def _load_pdf(path: Path) -> FileContent:
 
 
 def _load_image(path: Path) -> FileContent:
-    """Read raw image bytes, converting to PNG if needed."""
+    """Read image bytes, compress and resize for Gemini."""
     img_bytes = path.read_bytes()
-
-    # Ensure it's valid and convert to PNG for consistency
-    try:
-        img = Image.open(io.BytesIO(img_bytes))
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        png_bytes = buf.getvalue()
-    except Exception:
-        # If Pillow can't process it, send raw bytes
-        png_bytes = img_bytes
-
-    return FileContent(images=[png_bytes], source_name=path.name)
+    compressed = _compress_image(img_bytes)
+    logger.info(
+        "Image %s: %d KB → %d KB",
+        path.name,
+        len(img_bytes) // 1024,
+        len(compressed) // 1024,
+    )
+    return FileContent(images=[compressed], source_name=path.name)
 
 
 def _load_docx(path: Path) -> FileContent:
@@ -150,3 +161,32 @@ def _text_to_image(text: str, width: int = 1200, font_size: int = 18) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def _compress_image(img_bytes: bytes) -> bytes:
+    """
+    Compress and resize an image to reduce Gemini token usage.
+
+    - Resize to max MAX_IMAGE_WIDTH pixels wide (keep aspect ratio)
+    - Convert to JPEG with quality JPEG_QUALITY
+    """
+    try:
+        img = Image.open(io.BytesIO(img_bytes))
+
+        # Convert RGBA → RGB (JPEG doesn't support alpha)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+
+        # Resize if too wide
+        if img.width > MAX_IMAGE_WIDTH:
+            ratio = MAX_IMAGE_WIDTH / img.width
+            new_size = (MAX_IMAGE_WIDTH, int(img.height * ratio))
+            img = img.resize(new_size, Image.LANCZOS)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+        return buf.getvalue()
+
+    except Exception:
+        # If compression fails, return original bytes
+        return img_bytes

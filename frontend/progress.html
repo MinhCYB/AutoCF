@@ -235,6 +235,7 @@ function connectSSE() {
     eventSource = new EventSource('/api/status');
     let completed = 0;
     let total = uploadProblems.length;
+    let errorCount = 0;
 
     eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -266,13 +267,14 @@ function connectSSE() {
 
             case 'problem_error':
                 completed = data.progress;
+                errorCount++;
                 updateStatus(data.index, 'error', data.error);
                 updateProgress(completed, total);
                 addLog(`❌ Lỗi: ${data.error}`, 'error');
                 break;
 
             case 'done':
-                onUploadDone(total);
+                onUploadDone(total, errorCount > 0);
                 eventSource.close();
                 break;
 

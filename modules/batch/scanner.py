@@ -16,6 +16,7 @@ Expected input structure:
     │       └── 2.a
 """
 
+import re
 from pathlib import Path
 
 from modules.parser.file_loader import SUPPORTED_EXTENSIONS
@@ -57,7 +58,12 @@ def scan_problems_dir(
 
     for i, folder in enumerate(folders):
         index = start_index + i
-        polygon_name = f"{level} - {contest_name} - {index:02d}"
+        # Polygon only allows: lowercase [a-z], digits [0-9], dash [-]
+        raw_name = f"{level}-{contest_name}-{index:02d}"
+        # Sanitize: lowercase, replace spaces/underscores with dashes, strip invalid chars
+        polygon_name = re.sub(r"[^a-z0-9-]", "", raw_name.lower().replace(" ", "-").replace("_", "-"))
+        # Collapse multiple dashes
+        polygon_name = re.sub(r"-{2,}", "-", polygon_name).strip("-")
 
         # --- Detect problem files ---
         problem_files = [
