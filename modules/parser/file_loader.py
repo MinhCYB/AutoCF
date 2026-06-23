@@ -116,8 +116,10 @@ def _load_docx(path: Path) -> FileContent:
     doc = Document(str(path))
     images = []
 
-    # Extract embedded images
+    # Extract embedded images (skip external links)
     for rel in doc.part.rels.values():
+        if rel.is_external:
+            continue
         if "image" in rel.reltype:
             try:
                 blob = rel.target_part.blob

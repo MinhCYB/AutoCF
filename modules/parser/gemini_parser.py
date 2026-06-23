@@ -19,7 +19,7 @@ logger = logging.getLogger("polygon-uploader.parser")
 
 # Retry config for rate-limited API calls
 MAX_RETRIES = 3
-RETRY_DELAYS = [10, 30, 60]  # seconds — escalating backoff
+RETRY_DELAYS = [15, 45, 90]  # seconds — escalating backoff (free tier cần delay dài hơn)
 
 # System prompt for Gemini (from design doc)
 PARSE_PROMPT = """Bạn là trợ lý phân tích đề bài lập trình thi đấu.

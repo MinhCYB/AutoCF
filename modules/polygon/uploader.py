@@ -22,7 +22,7 @@ from modules.polygon.client import PolygonClient
 async def upload_problem(
     client: PolygonClient,
     problem: Problem,
-    lang: str = "vietnamese",
+    lang: str = "english",
     on_log: Optional[Callable[[str], Awaitable[None]]] = None,
 ) -> dict:
     """
@@ -31,7 +31,9 @@ async def upload_problem(
     Args:
         client: Authenticated PolygonClient.
         problem: Problem data to upload.
-        lang: Statement language code (default "vietnamese").
+        lang: Statement language code. Polygon chấp nhận: english, russian,
+              chinese, kazakh, ukrainian, spanish, portuguese, french, german,
+              persian. Không có "vietnamese" — nếu truyền vào sẽ fallback "english".
         on_log: Async callback for progress logging.
 
     Returns:
@@ -49,9 +51,11 @@ async def upload_problem(
     await log(f"Tạo problem '{problem.polygon_name}'...")
     result = await client.call("problem.create", name=problem.polygon_name)
     problem_id = result["result"]["id"]
+    problem_name = problem.polygon_name
     await log(f"✅ Tạo thành công (ID: {problem_id})")
 
     # ── 2. Update info ──
+    # Polygon problem-specific methods dùng problemId (integer) để identify problem
     await log(f"Cập nhật limits: {problem.time_limit}ms / {problem.memory_limit}MB...")
     await client.call(
         "problem.updateInfo",
@@ -62,10 +66,16 @@ async def upload_problem(
     await log("✅ Limits đã cập nhật")
 
     # ── 3. Save statement ──
-    await log("Upload statement...")
+    # Bug fix: Polygon chỉ chấp nhận các lang code chuẩn như "english", "russian", ...
+    # Không có "vietnamese" → fallback về "english" để tránh FAILED
+    polygon_lang = lang if lang in (
+        "english", "russian", "chinese", "kazakh", "ukrainian",
+        "spanish", "portuguese", "french", "german", "persian",
+    ) else "english"
+    await log(f"Upload statement (lang={polygon_lang})...")
     stmt_params = {
         "problemId": problem_id,
-        "lang": lang,
+        "lang": polygon_lang,
         "encoding": "UTF-8",
         "name": problem.title,
         "legend": problem.statement,
@@ -79,6 +89,8 @@ async def upload_problem(
     await log("✅ Statement uploaded")
 
     # ── 4. Save example tests ──
+    # Bug fix: param đúng là testOutputForStatements (theo API docs), kết hợp với
+    # testInputForStatements để hiển thị đúng example trong statement
     for i, ex in enumerate(problem.examples, start=1):
         await log(f"Upload example test {i}...")
         await client.call(
@@ -88,6 +100,7 @@ async def upload_problem(
             testIndex=i,
             testInput=ex.input,
             testUseInStatements=True,
+            testInputForStatements=ex.input,
             testOutputForStatements=ex.output,
         )
         await log(f"✅ Example test {i}")
@@ -109,14 +122,18 @@ async def upload_problem(
             for tf in test_inputs:
                 idx = test_offset + int(tf.name)
                 test_input = tf.read_text(encoding="utf-8")
+                # Check for corresponding .a answer file
+                answer_path = tf.parent / f"{tf.name}.a"
                 await log(f"Upload test {idx} (file)...")
-                await client.call(
-                    "problem.saveTest",
-                    problemId=problem_id,
-                    testset="tests",
-                    testIndex=idx,
-                    testInput=test_input,
-                )
+                call_params: dict = {
+                    "problemId": problem_id,
+                    "testset": "tests",
+                    "testIndex": idx,
+                    "testInput": test_input,
+                }
+                if answer_path.is_file():
+                    call_params["testOutputForStatements"] = answer_path.read_text(encoding="utf-8")
+                await client.call("problem.saveTest", **call_params)
                 await log(f"✅ Test {idx}")
 
     # ── 5. Set checker ──

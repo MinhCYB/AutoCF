@@ -84,7 +84,7 @@ async def startup():
         "polygon_secret": os.getenv("POLYGON_SECRET", ""),
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
         "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
-        "lang": "vietnamese",
+        "lang": "english",
         "level": "lv1",
         "contest_name": "",
         "start_index": 1,
@@ -335,19 +335,34 @@ async def parse_single(idx: int):
         )
 
 
+# Delay giữa các lần gọi Gemini khi parse batch (giây)
+# Flash Lite free tier bị throttle nặng — 5s đủ để tránh 429 liên tiếp
+INTER_PARSE_DELAY = 5.0
+
+
 @app.post("/api/parse-all")
 async def parse_all():
-    """Parse all scanned problems sequentially."""
+    """Parse all scanned problems sequentially with delay between calls."""
     if not state.scan_results:
         return JSONResponse({"error": "Chưa scan thư mục"}, status_code=400)
 
-    results = []
-    for idx, scan in enumerate(state.scan_results):
-        if scan["status"] == "error":
-            results.append({"index": idx, "status": "skipped", "reason": scan["warning"]})
-            continue
+    valid = [
+        (i, s) for i, s in enumerate(state.scan_results) if s["status"] != "error"
+    ]
+    results = [
+        {"index": i, "status": "skipped", "reason": s["warning"]}
+        for i, s in enumerate(state.scan_results) if s["status"] == "error"
+    ]
 
-        # Reuse the single-parse endpoint logic
+    for call_idx, (idx, scan) in enumerate(valid):
+        # Delay before every call except the first one to avoid Gemini rate limits
+        if call_idx > 0:
+            logger.info(
+                "[parse-all] Đợi %.1fs trước khi parse bài tiếp theo (%d/%d)...",
+                INTER_PARSE_DELAY, call_idx + 1, len(valid),
+            )
+            await asyncio.sleep(INTER_PARSE_DELAY)
+
         resp = await parse_single(idx)
         if isinstance(resp, JSONResponse):
             body = json.loads(resp.body.decode())
@@ -355,6 +370,7 @@ async def parse_all():
         else:
             results.append({"index": idx, **resp})
 
+    results.sort(key=lambda r: r["index"])
     return {"status": "ok", "results": results}
 
 
