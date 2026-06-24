@@ -21,6 +21,11 @@ logger = logging.getLogger("polygon-uploader.parser")
 MAX_RETRIES = 3
 RETRY_DELAYS = [15, 45, 90]  # seconds — escalating backoff (free tier cần delay dài hơn)
 
+# Per-call throttle — enforce minimum gap between Gemini requests regardless of caller
+# Gemini free tier: 15 RPM → safe floor is ~10s between calls
+MIN_CALL_INTERVAL = 10.0  # seconds
+_last_call_time: float = 0.0
+
 # System prompt for Gemini (from design doc)
 PARSE_PROMPT = """Bạn là trợ lý phân tích đề bài lập trình thi đấu.
 Hãy đọc đề bài trong ảnh/file và trả về JSON với cấu trúc sau.
@@ -162,6 +167,16 @@ async def parse_problem(
 
     # Add instruction prompt last
     parts.append(PARSE_PROMPT)
+
+    # Per-call throttle — enforce minimum gap between Gemini requests
+    global _last_call_time
+    import time as _time_module
+    elapsed = _time_module.monotonic() - _last_call_time
+    if elapsed < MIN_CALL_INTERVAL:
+        wait = MIN_CALL_INTERVAL - elapsed
+        logger.info("⏳ Throttle: đợi %.1fs trước khi gọi Gemini...", wait)
+        await asyncio.sleep(wait)
+    _last_call_time = _time_module.monotonic()
 
     # Call Gemini with retry for rate limits
     raw_text = None

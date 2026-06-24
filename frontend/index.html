@@ -44,23 +44,50 @@
         <div class="card-header">
             <div class="card-icon green">🤖</div>
             <div>
-                <div class="card-title">Gemini API <span id="gemini-status" class="badge badge-info" style="display:none"></span></div>
-                <div class="card-desc">API key từ aistudio.google.com</div>
+                <div class="card-title">Parser <span id="gemini-status" class="badge badge-info" style="display:none"></span></div>
+                <div class="card-desc">Chọn backend để parse đề bài từ ảnh</div>
             </div>
         </div>
-        <div class="form-row">
-            <div class="form-group" style="flex:2">
-                <label for="gemini-key">API Key</label>
-                <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
-            </div>
-            <div class="form-group" style="flex:1">
-                <label for="gemini-model">Model</label>
-                <select id="gemini-model">
-                    <option value="gemini-2.0-flash">⚡ 2.0 Flash</option>
-                    <option value="gemini-2.0-flash-lite">🪶 2.0 Flash Lite (nhẹ hơn)</option>
-                    <option value="gemini-2.5-flash">🚀 2.5 Flash</option>
-                    <option value="gemini-1.5-flash">📦 1.5 Flash</option>
+        <!-- Backend selector -->
+        <div class="form-row" style="margin-bottom:8px">
+            <div class="form-group">
+                <label for="parser-backend">Backend</label>
+                <select id="parser-backend" onchange="onParserBackendChange()">
+                    <option value="gemini">☁️ Gemini API (cloud)</option>
+                    <option value="ollama">🦙 Ollama (local)</option>
+                    <option value="g4f">🆓 GPT4Free (no key)</option>
                 </select>
+            </div>
+        </div>
+        <!-- Gemini fields -->
+        <div id="parser-gemini-fields">
+            <div class="form-row">
+                <div class="form-group" style="flex:2">
+                    <label for="gemini-key">Gemini API Key</label>
+                    <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label for="gemini-model">Model</label>
+                    <select id="gemini-model">
+                        <option value="gemini-2.0-flash">⚡ 2.0 Flash</option>
+                        <option value="gemini-2.0-flash-lite">🪶 2.0 Flash Lite</option>
+                        <option value="gemini-2.5-flash">🚀 2.5 Flash</option>
+                        <option value="gemini-1.5-flash">📦 1.5 Flash</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+        <!-- Ollama fields -->
+        <div id="parser-ollama-fields" style="display:none">
+            <div class="form-row">
+                <div class="form-group" style="flex:2">
+                    <label for="ollama-model">Model</label>
+                    <input type="text" id="ollama-model" placeholder="llava:7b-v1.6-mistral-q4_0">
+                </div>
+                <div class="form-group" style="flex:1">
+                    <label for="ollama-url">URL</label>
+                    <input type="text" id="ollama-url" placeholder="http://localhost:11434">
+                </div>
             </div>
         </div>
     </div>
@@ -192,6 +219,9 @@ let scanResults = [];
     if (saved.start_index) document.getElementById('start-index').value = saved.start_index;
     if (saved.lang) document.getElementById('lang').value = saved.lang;
     if (saved.gemini_model) document.getElementById('gemini-model').value = saved.gemini_model;
+    if (saved.parser_backend) { document.getElementById('parser-backend').value = saved.parser_backend; onParserBackendChange(); }
+    if (saved.ollama_model) document.getElementById('ollama-model').value = saved.ollama_model;
+    if (saved.ollama_url) document.getElementById('ollama-url').value = saved.ollama_url;
     if (saved.folder_path) {
         document.getElementById('folder-path').value = saved.folder_path;
         document.getElementById('btn-scan').disabled = false;
@@ -208,6 +238,9 @@ let scanResults = [];
         if (config.start_index && !saved.start_index) document.getElementById('start-index').value = config.start_index;
         if (!saved.lang && config.lang) document.getElementById('lang').value = config.lang;
         if (!saved.gemini_model && config.gemini_model) document.getElementById('gemini-model').value = config.gemini_model;
+        if (!saved.parser_backend && config.parser_backend) { document.getElementById('parser-backend').value = config.parser_backend; onParserBackendChange(); }
+        if (!saved.ollama_model && config.ollama_model) document.getElementById('ollama-model').value = config.ollama_model;
+        if (!saved.ollama_url && config.ollama_url) document.getElementById('ollama-url').value = config.ollama_url;
 
         // Show key status from .env
         const polygonStatus = document.getElementById('polygon-status');
@@ -248,12 +281,21 @@ let scanResults = [];
     if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
 })();
 
+function onParserBackendChange() {
+    const backend = document.getElementById('parser-backend').value;
+    document.getElementById('parser-gemini-fields').style.display = backend === 'gemini' ? '' : 'none';
+    document.getElementById('parser-ollama-fields').style.display = backend === 'ollama' ? '' : 'none';
+}
+
 function saveConfigLocal() {
     const config = {
         polygon_key: document.getElementById('polygon-key').value,
         polygon_secret: document.getElementById('polygon-secret').value,
         gemini_key: document.getElementById('gemini-key').value,
         gemini_model: document.getElementById('gemini-model').value,
+        parser_backend: document.getElementById('parser-backend').value,
+        ollama_model: document.getElementById('ollama-model').value,
+        ollama_url: document.getElementById('ollama-url').value,
         level: document.getElementById('level').value,
         contest_name: document.getElementById('contest-name').value,
         start_index: document.getElementById('start-index').value,
@@ -555,6 +597,9 @@ async function saveConfigToServer() {
             polygon_secret: polygonSecret,
             gemini_api_key: geminiKey,
             gemini_model: document.getElementById('gemini-model').value,
+            parser_backend: document.getElementById('parser-backend').value,
+            ollama_model: document.getElementById('ollama-model').value,
+            ollama_url: document.getElementById('ollama-url').value,
             lang: document.getElementById('lang').value,
             level: document.getElementById('level').value,
             contest_name: document.getElementById('contest-name').value,

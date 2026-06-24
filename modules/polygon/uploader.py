@@ -19,6 +19,71 @@ from modules.parser.models import Problem
 from modules.polygon.client import PolygonClient
 
 
+def gen_dummy_solution(examples: list) -> str:
+    """
+    Generate a C++ dummy solution that hardcodes outputs for each example test case.
+    Reads input line by line, matches against known inputs, prints hardcoded output.
+    Fallback: print the first example output unconditionally.
+    """
+    if not examples:
+        return (
+            "#include <bits/stdc++.h>\n"
+            "using namespace std;\n"
+            "int main() {\n"
+            "    // TODO: implement solution\n"
+            "    return 0;\n"
+            "}\n"
+        )
+
+    cases = []
+    for ex in examples:
+        inp = ex["input"] if isinstance(ex, dict) else ex.input
+        out = ex["output"] if isinstance(ex, dict) else ex.output
+        cases.append((inp.strip(), out.strip()))
+
+    lines = [
+        "#include <bits/stdc++.h>",
+        "using namespace std;",
+        "",
+        "// AUTO-GENERATED dummy solution — hardcodes example outputs",
+        "// Replace with actual solution before contest.",
+        "",
+        "int main() {",
+        "    ios::sync_with_stdio(false);",
+        "    cin.tie(nullptr);",
+        "",
+        "    // Read all input",
+        "    string input_data, line;",
+        "    while (getline(cin, line)) {",
+        "        if (!input_data.empty()) input_data += '\\n';",
+        "        input_data += line;",
+        "    }",
+        "",
+    ]
+
+    for i, (inp, out) in enumerate(cases):
+        escaped_inp = inp.replace("\\", "\\\\").replace('"', '\\"'). \
+            replace("\n", "\\n").replace("\r", "")
+        escaped_out = out.replace("\\", "\\\\").replace('"', '\\"'). \
+            replace("\n", "\\n").replace("\r", "")
+        cond = "if" if i == 0 else "} else if"
+        lines.append(f'    {cond} (input_data == "{escaped_inp}") {{')
+        lines.append(f'        cout << "{escaped_out}" << endl;')
+
+    lines += [
+        "    } else {",
+        f'        // Fallback: output first example',
+        f'        cout << "{cases[0][1].replace(chr(10), "\\n").replace(chr(34), chr(92)+chr(34))}" << endl;',
+        "    }",
+        "",
+        "    return 0;",
+        "}",
+        "",
+    ]
+
+    return "\n".join(lines)
+
+
 async def upload_problem(
     client: PolygonClient,
     problem: Problem,
@@ -49,8 +114,39 @@ async def upload_problem(
 
     # ── 1. Create problem ──
     await log(f"Tạo problem '{problem.polygon_name}'...")
-    result = await client.call("problem.create", name=problem.polygon_name)
-    problem_id = result["result"]["id"]
+    try:
+        result = await client.call("problem.create", name=problem.polygon_name)
+        raw_result = result.get("result", {})
+        if isinstance(raw_result, dict):
+            problem_id = raw_result["id"]
+        else:
+            import re as _re
+            m = _re.search(r'"id"\s*:\s*(\d+)', str(raw_result))
+            if m:
+                problem_id = int(m.group(1))
+            else:
+                raise ValueError("Cannot parse problem_id from create response")
+    except Exception as create_err:
+        err_str = str(create_err)
+        if "already have such problem" in err_str or "already exists" in err_str.lower():
+            # Problem đã tồn tại — tìm ID qua problems.list
+            await log(f"⚠️ Problem '{problem.polygon_name}' đã tồn tại, tìm ID để update...")
+            list_result = await client.call("problems.list")
+            raw_list = list_result.get("result", [])
+            # result có thể là list hoặc dict với key "problems"
+            if isinstance(raw_list, list):
+                problems_list = raw_list
+            elif isinstance(raw_list, dict):
+                problems_list = raw_list.get("problems", [])
+            else:
+                problems_list = []
+            matched = [p for p in problems_list if isinstance(p, dict) and p.get("name") == problem.polygon_name]
+            if not matched:
+                raise ValueError(f"Không tìm thấy problem '{problem.polygon_name}' trong danh sách")
+            problem_id = matched[0]["id"]
+            await log(f"✅ Tìm thấy problem ID={problem_id}, tiếp tục update...")
+        else:
+            raise
     problem_name = problem.polygon_name
     await log(f"✅ Tạo thành công (ID: {problem_id})")
 
@@ -137,28 +233,49 @@ async def upload_problem(
                 await log(f"✅ Test {idx}")
 
     # ── 5. Set checker ──
-    await log(f"Set checker: {problem.checker}...")
+    checker = problem.checker if problem.checker and problem.checker.strip() else "std::wcmp.cpp"
+    await log(f"Set checker: {checker}...")
     await client.call(
         "problem.setChecker",
         problemId=problem_id,
-        checker=problem.checker,
+        checker=checker,
     )
     await log(f"✅ Checker: {problem.checker}")
 
-    # ── 6. Upload solution (optional) ──
+    # ── 6. Upload solution ──
     if problem.solution_path:
         sol_path = Path(problem.solution_path)
         if sol_path.is_file():
             sol_content = sol_path.read_text(encoding="utf-8")
-            await log(f"Upload solution: {sol_path.name}...")
-            await client.call(
-                "problem.saveSolution",
-                problemId=problem_id,
-                name=sol_path.name,
-                file=sol_content,
-                tag="MA",
-            )
-            await log(f"✅ Solution: {sol_path.name}")
+            sol_name = sol_path.name
+            await log(f"Upload solution: {sol_name}...")
+        else:
+            await log("Không có file solution, gen dummy solution C++...")
+            sol_content = gen_dummy_solution(problem.examples)
+            sol_name = "dummy_solution.cpp"
+    else:
+        await log("Không có file solution, gen dummy solution C++...")
+        sol_content = gen_dummy_solution(problem.examples)
+        sol_name = "dummy_solution.cpp"
+
+    await client.call(
+        "problem.saveSolution",
+        problemId=problem_id,
+        name=sol_name,
+        file=sol_content,
+        tag="MA",
+    )
+    await log(f"✅ Solution: {sol_name}")
+
+    # ── 7. Save tags ──
+    if problem.tags:
+        await log(f"Lưu tags: {', '.join(problem.tags)}...")
+        await client.call(
+            "problem.saveTags",
+            problemId=problem_id,
+            tags=",".join(problem.tags),
+        )
+        await log(f"✅ Tags: {', '.join(problem.tags)}")
 
     # ── 7. Commit ──
     await log("Commit changes...")
@@ -169,6 +286,33 @@ async def upload_problem(
         message="Auto upload by polygon-uploader",
     )
     await log("✅ Commit thành công!")
+
+    # ── 8. Build package ──
+    await log("Tạo package (Standard)...")
+    pkg_result = await client.call(
+        "problem.buildPackage",
+        problemId=problem_id,
+        full=False,
+        verify=True,
+    )
+    # buildPackage là async trên Polygon — poll cho đến khi xong
+    import asyncio as _asyncio
+    for _ in range(30):
+        await _asyncio.sleep(3)
+        pkg_list = await client.call("problem.getPackages", problemId=problem_id)
+        packages = pkg_list.get("result", [])
+        if isinstance(packages, list) and packages:
+            latest = sorted(packages, key=lambda p: p.get("id", 0))[-1]
+            state_str = latest.get("state", "")
+            if state_str == "READY":
+                await log(f"✅ Package tạo thành công!")
+                break
+            elif state_str == "FAILED":
+                await log(f"⚠️ Package build thất bại — kiểm tra Polygon manually")
+                break
+        # Nếu chưa có package nào hoặc chưa READY thì tiếp tục đợi
+    else:
+        await log("⚠️ Package build timeout — kiểm tra Polygon manually")
 
     return {
         "problem_id": problem_id,

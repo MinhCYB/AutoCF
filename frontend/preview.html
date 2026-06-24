@@ -116,6 +116,17 @@
                     </select>
                 </div>
             </div>
+            <div class="form-row" style="margin-top:8px">
+                <div class="form-group" style="flex:1">
+                    <label>Tags</label>
+                    <div id="tags-container" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:34px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--bg)">
+                    </div>
+                    <div style="display:flex;gap:6px;margin-top:6px">
+                        <input type="text" id="tag-input" placeholder="Thêm tag..." style="flex:1" onkeydown="if(event.key==='Enter'){addTag();event.preventDefault()}">
+                        <button class="btn btn-secondary" onclick="addTag()" style="padding:4px 12px">+</button>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- Input/Output Format -->
@@ -243,6 +254,7 @@ function showProblem(idx) {
     document.getElementById('edit-time').value = prob.time_limit || 1000;
     document.getElementById('edit-memory').value = prob.memory_limit || 256;
     document.getElementById('edit-checker').value = prob.checker || 'std::wcmp';
+    renderTags(prob.tags && prob.tags.length ? prob.tags : ['yb-boclot']);
 
     // Statement → LaTeX editor
     document.getElementById('latex-editor').value = prob.statement || '';
@@ -352,6 +364,7 @@ function saveCurrent() {
     prob.time_limit = parseInt(document.getElementById('edit-time').value) || 1000;
     prob.memory_limit = parseInt(document.getElementById('edit-memory').value) || 256;
     prob.checker = document.getElementById('edit-checker').value;
+    prob.tags = getCurrentTags();
     prob.statement = document.getElementById('latex-editor').value;
     prob.input_format = document.getElementById('edit-input').value;
     prob.output_format = document.getElementById('edit-output').value;
@@ -448,6 +461,40 @@ function showToast(message, type = 'info') {
     toast.textContent = message;
     document.body.appendChild(toast);
     setTimeout(() => toast.remove(), 3000);
+}
+
+// ─── Tags ───
+function renderTags(tags) {
+    const container = document.getElementById('tags-container');
+    container.innerHTML = '';
+    (tags || []).forEach(tag => {
+        const chip = document.createElement('span');
+        chip.style.cssText = 'display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:#e8f4fd;border:1px solid #3b82f6;border-radius:12px;font-size:13px;';
+        chip.innerHTML = tag + ' <span onclick="removeTag(this)" style="cursor:pointer;font-size:11px;opacity:0.6">✕</span>';
+        chip.dataset.tag = tag;
+        container.appendChild(chip);
+    });
+}
+
+function getCurrentTags() {
+    return Array.from(document.querySelectorAll('#tags-container [data-tag]'))
+        .map(el => el.dataset.tag);
+}
+
+function addTag() {
+    const input = document.getElementById('tag-input');
+    const val = input.value.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-{2,}/g, '-').replace(/^-|-$/g, '');
+    if (!val) return;
+    const existing = getCurrentTags();
+    if (existing.includes(val)) { input.value = ''; return; }
+    renderTags([...existing, val]);
+    input.value = '';
+}
+
+function removeTag(el) {
+    const chip = el.parentElement;
+    const tag = chip.dataset.tag;
+    renderTags(getCurrentTags().filter(t => t !== tag));
 }
 </script>
 

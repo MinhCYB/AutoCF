@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from modules.batch.scanner import scan_problems_dir
 from modules.parser.file_loader import load_file
-from modules.parser.gemini_parser import parse_problem
+from modules.parser import gemini_parser, ollama_parser, g4f_parser
 from modules.parser.models import Example, Problem
 from modules.polygon.client import PolygonClient
 from modules.polygon.uploader import upload_problem
@@ -84,6 +84,9 @@ async def startup():
         "polygon_secret": os.getenv("POLYGON_SECRET", ""),
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
         "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        "parser_backend": os.getenv("PARSER_BACKEND", "gemini"),
+        "ollama_model": os.getenv("OLLAMA_MODEL", "llava"),
+        "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
         "lang": "english",
         "level": "lv1",
         "contest_name": "",
@@ -120,6 +123,12 @@ async def get_config():
     c = dict(state.config)
 
     # Mask secrets for display, but tell frontend they exist
+    # Pass through non-secret fields directly
+    for field in ("gemini_model", "parser_backend", "ollama_model", "ollama_url",
+                  "lang", "level", "contest_name", "start_index"):
+        if field in c:
+            pass  # already in c
+
     for key in ("polygon_api_key", "polygon_secret", "gemini_api_key"):
         val = c.get(key, "")
         if len(val) > 8:
@@ -140,6 +149,9 @@ class SaveConfigRequest(BaseModel):
     polygon_secret: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
+    parser_backend: str = "gemini"   # "gemini" | "ollama" | "g4f"
+    ollama_model: str = "llava"
+    ollama_url: str = "http://localhost:11434"
     lang: str = "vietnamese"
     level: str = "lv1"
     contest_name: str = ""
@@ -157,6 +169,9 @@ async def save_config(req: SaveConfigRequest):
         state.config["gemini_api_key"] = req.gemini_api_key
 
     state.config["gemini_model"] = req.gemini_model
+    state.config["parser_backend"] = req.parser_backend
+    state.config["ollama_model"] = req.ollama_model
+    state.config["ollama_url"] = req.ollama_url
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
@@ -290,10 +305,20 @@ async def parse_single(idx: int):
             idx, len(content.images), len(content.text),
         )
 
-        # Step 2: Call Gemini
-        gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
-        logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
-        problem = await parse_problem(content, gemini_key, model=gemini_model)
+        # Step 2: Call parser (Gemini or Ollama)
+        backend = state.config.get("parser_backend", "gemini")
+        if backend == "ollama":
+            ollama_model = state.config.get("ollama_model", "llava")
+            ollama_url = state.config.get("ollama_url", "http://localhost:11434")
+            logger.info("[parse %d] Gọi Ollama (model: %s, url: %s)...", idx, ollama_model, ollama_url)
+            problem = await ollama_parser.parse_problem(content, model=ollama_model, base_url=ollama_url)
+        elif backend == "g4f":
+            logger.info("[parse %d] Gọi g4f (free providers)...", idx)
+            problem = await g4f_parser.parse_problem(content)
+        else:
+            gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
+            logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
+            problem = await gemini_parser.parse_problem(content, gemini_key, model=gemini_model)
         logger.info(
             "[parse %d] ✅ Parse thành công — title: %s, %d example(s)",
             idx, problem.title, len(problem.examples),
@@ -407,6 +432,7 @@ class UpdateProblemRequest(BaseModel):
     output_format: Optional[str] = None
     notes: Optional[str] = None
     examples: Optional[list[dict]] = None
+    tags: Optional[list[str]] = None
     status: Optional[str] = None
 
 
