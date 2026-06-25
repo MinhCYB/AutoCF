@@ -293,28 +293,33 @@ async def upload_problem(
 
     # ── 8. Build package ──
     await log("Tạo package (Standard)...")
-    pkg_result = await client.call(
-        "problem.buildPackage",
-        problemId=problem_id,
-        full=False,
-        verify=True,
-    )
-    # buildPackage là async trên Polygon — poll cho đến khi xong
+    try:
+        await client.call(
+            "problem.buildPackage",
+            problemId=problem_id,
+            full=False,
+            verify=True,
+        )
+    except Exception as e:
+        await log(f"⚠️ buildPackage warning: {e}")
     import asyncio as _asyncio
     for _ in range(30):
         await _asyncio.sleep(3)
-        pkg_list = await client.call("problem.getPackages", problemId=problem_id)
-        packages = pkg_list.get("result", [])
-        if isinstance(packages, list) and packages:
-            latest = sorted(packages, key=lambda p: p.get("id", 0))[-1]
-            state_str = latest.get("state", "")
-            if state_str == "READY":
-                await log(f"✅ Package tạo thành công!")
-                break
-            elif state_str == "FAILED":
-                await log(f"⚠️ Package build thất bại — kiểm tra Polygon manually")
-                break
-        # Nếu chưa có package nào hoặc chưa READY thì tiếp tục đợi
+        try:
+            pkg_list = await client.call("problem.getPackages", problemId=problem_id)
+            packages = pkg_list.get("result", [])
+            if isinstance(packages, list) and packages:
+                latest = sorted(packages, key=lambda p: p.get("id", 0))[-1]
+                state_str = latest.get("state", "")
+                if state_str == "READY":
+                    await log("✅ Package tạo thành công!")
+                    break
+                elif state_str == "FAILED":
+                    await log("⚠️ Package build thất bại — kiểm tra Polygon manually")
+                    break
+        except Exception as e:
+            await log(f"⚠️ getPackages warning: {e}")
+            break
     else:
         await log("⚠️ Package build timeout — kiểm tra Polygon manually")
 

@@ -77,10 +77,21 @@ class PolygonClient:
 
         # Some methods return raw content (not JSON)
         content_type = response.headers.get("content-type", "")
-        if "application/json" not in content_type and response.status_code == 200:
-            return {"status": "OK", "result": response.text}
+        if "application/json" not in content_type:
+            if response.status_code == 200:
+                return {"status": "OK", "result": response.text}
+            else:
+                raise PolygonAPIError(method_name, f"HTTP {response.status_code}: {response.text[:200]}")
+
+        # Handle empty JSON body
+        if not response.text.strip():
+            if response.status_code == 200:
+                return {"status": "OK", "result": None}
+            else:
+                raise PolygonAPIError(method_name, f"HTTP {response.status_code}: empty response")
 
         data = response.json()
+        import logging as _logging; _logging.getLogger("polygon-uploader.client").debug("API %s response: %s", method_name, str(data)[:500])
         if data.get("status") == "FAILED":
             raise PolygonAPIError(
                 method_name,
