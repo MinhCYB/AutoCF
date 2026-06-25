@@ -23,7 +23,7 @@ class Problem(BaseModel):
     polygon_name: str = ""
     time_limit: int = 1000       # ms, must be divisible by 50
     memory_limit: int = 256      # MB, 4-1024
-    checker: str = "std::wcmp.cpp"
+    checker: str = "std::lcmp.cpp"
 
     # --- Statement (LaTeX) ---
     title: str = ""

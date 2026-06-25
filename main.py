@@ -87,6 +87,8 @@ async def startup():
         "parser_backend": os.getenv("PARSER_BACKEND", "gemini"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "llava"),
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
+        "g4f_delay": float(os.getenv("G4F_DELAY", "15")),
+        "parse_delay": float(os.getenv("PARSE_DELAY", "15")),
         "lang": "english",
         "level": "lv1",
         "contest_name": "",
@@ -152,6 +154,8 @@ class SaveConfigRequest(BaseModel):
     parser_backend: str = "gemini"   # "gemini" | "ollama" | "g4f"
     ollama_model: str = "llava"
     ollama_url: str = "http://localhost:11434"
+    g4f_delay: float = 15.0
+    parse_delay: float = 15.0
     lang: str = "vietnamese"
     level: str = "lv1"
     contest_name: str = ""
@@ -172,6 +176,8 @@ async def save_config(req: SaveConfigRequest):
     state.config["parser_backend"] = req.parser_backend
     state.config["ollama_model"] = req.ollama_model
     state.config["ollama_url"] = req.ollama_url
+    state.config["g4f_delay"] = req.g4f_delay
+    state.config["parse_delay"] = req.parse_delay
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
@@ -313,8 +319,9 @@ async def parse_single(idx: int):
             logger.info("[parse %d] Gọi Ollama (model: %s, url: %s)...", idx, ollama_model, ollama_url)
             problem = await ollama_parser.parse_problem(content, model=ollama_model, base_url=ollama_url)
         elif backend == "g4f":
-            logger.info("[parse %d] Gọi g4f (free providers)...", idx)
-            problem = await g4f_parser.parse_problem(content)
+            g4f_delay = state.config.get("g4f_delay", 15.0)
+            logger.info("[parse %d] Gọi g4f (free providers, delay=%.0fs)...", idx, g4f_delay)
+            problem = await g4f_parser.parse_problem(content, retry_delay=g4f_delay)
         else:
             gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
             logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
@@ -382,11 +389,12 @@ async def parse_all():
     for call_idx, (idx, scan) in enumerate(valid):
         # Delay before every call except the first one to avoid Gemini rate limits
         if call_idx > 0:
+            _parse_delay = state.config.get("parse_delay", INTER_PARSE_DELAY)
             logger.info(
                 "[parse-all] Đợi %.1fs trước khi parse bài tiếp theo (%d/%d)...",
-                INTER_PARSE_DELAY, call_idx + 1, len(valid),
+                _parse_delay, call_idx + 1, len(valid),
             )
-            await asyncio.sleep(INTER_PARSE_DELAY)
+            await asyncio.sleep(_parse_delay)
 
         resp = await parse_single(idx)
         if isinstance(resp, JSONResponse):

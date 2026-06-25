@@ -233,14 +233,18 @@ async def upload_problem(
                 await log(f"✅ Test {idx}")
 
     # ── 5. Set checker ──
-    checker = problem.checker if problem.checker and problem.checker.strip() else "std::wcmp.cpp"
-    await log(f"Set checker: {checker}...")
-    await client.call(
-        "problem.setChecker",
-        problemId=problem_id,
-        checker=checker,
-    )
-    await log(f"✅ Checker: {problem.checker}")
+    checker = problem.checker if problem.checker and problem.checker.strip() else ""
+    if checker:
+        await log(f"Set checker: {checker}...")
+        try:
+            await client.call(
+                "problem.setChecker",
+                problemId=problem_id,
+                checker=checker,
+            )
+            await log(f"✅ Checker: {checker}")
+        except Exception as e:
+            await log(f"⚠️ Không set được checker '{checker}': {e} — bỏ qua")
 
     # ── 6. Upload solution ──
     if problem.solution_path:

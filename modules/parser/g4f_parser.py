@@ -28,7 +28,8 @@ logger = logging.getLogger("polygon-uploader.parser")
 # Each entry: (provider_name, model_name)
 PROVIDER_FALLBACKS = [
     ("PollinationsAI", "openai"),
-    ("GeminiPro",      "gemini-2.5-flash"),
+    # GeminiPro dùng Gemini API key từ env — bỏ để tránh quota conflict
+    # ("GeminiPro",      "gemini-2.5-flash"),
     ("Copilot",        "Copilot"),
 ]
 
@@ -146,6 +147,7 @@ async def parse_problem(
     api_key: str = "",      # unused — kept for interface compatibility
     model: str = "",        # unused — provider handles model selection
     providers: Optional[list] = None,
+    retry_delay: float = 15.0,
 ) -> Problem:
     """
     Parse problem using g4f free providers with automatic fallback.
@@ -172,7 +174,8 @@ async def parse_problem(
         except Exception as e:
             logger.warning("❌ Provider %s thất bại: %s", provider_name, e)
             last_error = e
-            await asyncio.sleep(2)
+            logger.info("⏳ Đợi %.0fs trước khi thử provider tiếp theo...", retry_delay)
+            await asyncio.sleep(retry_delay)
             continue
     else:
         raise ValueError(f"Tất cả provider đều thất bại. Lỗi cuối: {last_error}")

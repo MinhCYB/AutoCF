@@ -106,13 +106,17 @@
                 <div class="form-group">
                     <label for="edit-checker">Checker</label>
                     <select id="edit-checker">
-                        <option value="std::wcmp">std::wcmp (token)</option>
-                        <option value="std::ncmp">std::ncmp (số nguyên)</option>
-                        <option value="std::fcmp">std::fcmp (chính xác)</option>
-                        <option value="std::rcmp4">std::rcmp4 (thực 10⁻⁴)</option>
-                        <option value="std::rcmp6">std::rcmp6 (thực 10⁻⁶)</option>
-                        <option value="std::rcmp9">std::rcmp9 (thực 10⁻⁹)</option>
-                        <option value="std::yesno">std::yesno</option>
+                        <option value="">No checker</option>
+                        <option value="std::fcmp.cpp">fcmp — Lines, doesn't ignore whitespaces</option>
+                        <option value="std::hcmp.cpp">hcmp — Single huge integer</option>
+                        <option value="std::lcmp.cpp" selected>lcmp — Lines, ignores whitespaces</option>
+                        <option value="std::ncmp.cpp">ncmp — Single or more int64</option>
+                        <option value="std::nyesno.cpp">nyesno — Zero or more yes/no</option>
+                        <option value="std::rcmp4.cpp">rcmp4 — Double, max error 1E-4</option>
+                        <option value="std::rcmp6.cpp">rcmp6 — Double, max error 1E-6</option>
+                        <option value="std::rcmp9.cpp">rcmp9 — Double, max error 1E-9</option>
+                        <option value="std::wcmp.cpp">wcmp — Sequence of tokens</option>
+                        <option value="std::yesno.cpp">yesno — Single yes/no</option>
                     </select>
                 </div>
             </div>
@@ -253,7 +257,7 @@ function showProblem(idx) {
     document.getElementById('edit-title').value = prob.title || '';
     document.getElementById('edit-time').value = prob.time_limit || 1000;
     document.getElementById('edit-memory').value = prob.memory_limit || 256;
-    document.getElementById('edit-checker').value = prob.checker || 'std::wcmp';
+    document.getElementById('edit-checker').value = prob.checker || 'lcmp';
     renderTags(prob.tags && prob.tags.length ? prob.tags : ['yb-boclot']);
 
     // Statement → LaTeX editor
@@ -430,11 +434,13 @@ async function skipProblem() {
 }
 
 async function uploadAll() {
-    // Confirm all remaining unconfirmed problems
+    // Save current problem first (whatever is shown in DOM)
+    saveCurrent();
+
+    // Confirm all remaining unconfirmed problems — do NOT call saveCurrent() inside loop
+    // because saveCurrent() reads from DOM which only reflects the currently displayed problem
     for (let i = 0; i < problems.length; i++) {
         if (problems[i].status !== 'skipped' && problems[i].status !== 'confirmed') {
-            currentIdx = i;
-            saveCurrent();
             const prob = problems[i].problem;
             await fetch(`/api/problems/${problems[i].index}`, {
                 method: 'PUT',
