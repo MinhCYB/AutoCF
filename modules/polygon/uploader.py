@@ -9,7 +9,8 @@ Upload flow per problem:
   4. problem.saveTest (examples + optional test files)
   5. problem.setChecker
   6. problem.saveSolution (if exists)
-  7. problem.commitChanges
+  7. AI Codegen: gen solution / gen generator (optional, trước commit)
+  8. problem.commitChanges
 """
 
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Awaitable, Callable, Optional
 
 from modules.parser.models import Problem
 from modules.polygon.client import PolygonClient
-from modules.parser import gemini_codegen
+from modules.parser import g4f_codegen # g4f backend, drop-in replacement
 
 
 def gen_dummy_solution(examples: list) -> str:
@@ -252,29 +253,29 @@ async def upload_problem(
             await log(f"⚠️ Không set được checker '{checker}': {e} — bỏ qua")
 
     # ── 6. Upload solution ──
-    if problem.solution_path:
-        sol_path = Path(problem.solution_path)
-        if sol_path.is_file():
-            sol_content = sol_path.read_text(encoding="utf-8")
-            sol_name = sol_path.name
-            await log(f"Upload solution: {sol_name}...")
-        else:
-            await log("Không có file solution, gen dummy solution C++...")
-            sol_content = gen_dummy_solution(problem.examples)
-            sol_name = "dummy_solution.cpp"
-    else:
-        await log("Không có file solution, gen dummy solution C++...")
-        sol_content = gen_dummy_solution(problem.examples)
-        sol_name = "dummy_solution.cpp"
+    # if problem.solution_path:
+    #     sol_path = Path(problem.solution_path)
+    #     if sol_path.is_file():
+    #         sol_content = sol_path.read_text(encoding="utf-8")
+    #         sol_name = sol_path.name
+    #         await log(f"Upload solution: {sol_name}...")
+    #     else:
+    #         await log("Không có file solution, gen dummy solution C++...")
+    #         sol_content = gen_dummy_solution(problem.examples)
+    #         sol_name = "dummy_solution.cpp"
+    # else:
+    #     await log("Không có file solution, gen dummy solution C++...")
+    #     sol_content = gen_dummy_solution(problem.examples)
+    #     sol_name = "dummy_solution.cpp"
 
-    await client.call(
-        "problem.saveSolution",
-        problemId=problem_id,
-        name=sol_name,
-        file=sol_content,
-        tag="MA",
-    )
-    await log(f"✅ Solution: {sol_name}")
+    # await client.call(
+    #     "problem.saveSolution",
+    #     problemId=problem_id,
+    #     name=sol_name,
+    #     file=sol_content,
+    #     tag="MA",
+    # )
+    # await log(f"✅ Solution: {sol_name}")
 
     # ── 7. Save tags ──
     if problem.tags:
@@ -286,22 +287,13 @@ async def upload_problem(
         )
         await log(f"✅ Tags: {', '.join(problem.tags)}")
 
-    # ── 7. Commit ──
-    await log("Commit changes...")
-    await client.call(
-        "problem.commitChanges",
-        problemId=problem_id,
-        minorChanges=False,
-        message="Auto upload by polygon-uploader",
-    )
-    await log("✅ Commit thành công!")
-
-    # ── 8. AI Codegen (optional) ──
+    # ── 7. AI Codegen (optional) — chạy TRƯỚC commit để được include vào package ──
+    _codegen_done = False
     if (gen_solution or gen_tests) and gemini_api_key:
         if gen_solution:
-            await log("🤖 Gen solution C++ bằng Gemini...")
+            await log("🤖 Gen solution C++ bằng DeepSeek (g4f)...")
             try:
-                sol_code = await gemini_codegen.gen_solution(problem, gemini_api_key, gemini_model)
+                sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key, gemini_model)
                 if sol_code:
                     await client.call(
                         "problem.saveSolution",
@@ -311,13 +303,14 @@ async def upload_problem(
                         tag="MA",
                     )
                     await log("✅ Solution C++ đã upload")
+                    _codegen_done = True
             except Exception as e:
                 await log(f"⚠️ Gen solution thất bại: {e}")
 
         if gen_tests:
-            await log("🤖 Gen test generator C++ bằng Gemini...")
+            await log("🤖 Gen test generator C++ bằng DeepSeek (g4f)...")
             try:
-                gen_code = await gemini_codegen.gen_generator(problem, gemini_api_key, gemini_model)
+                gen_code = await g4f_codegen.gen_generator(problem, gemini_api_key, gemini_model)
                 if gen_code:
                     await client.call(
                         "problem.saveFile",
@@ -327,10 +320,21 @@ async def upload_problem(
                         file=gen_code,
                     )
                     await log("✅ Test generator đã upload")
+                    _codegen_done = True
             except Exception as e:
                 await log(f"⚠️ Gen test generator thất bại: {e}")
 
-    # ── 8. Build package ──
+    # ── 8. Commit — sau khi đã có đủ solution/generator ──
+    await log("Commit changes...")
+    await client.call(
+        "problem.commitChanges",
+        problemId=problem_id,
+        minorChanges=False,
+        message="Auto upload by polygon-uploader",
+    )
+    await log("✅ Commit thành công!")
+
+    # ── 9. Build package ──
     await log("Tạo package (Standard)...")
     try:
         await client.call(
