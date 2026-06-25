@@ -17,6 +17,7 @@ from typing import Awaitable, Callable, Optional
 
 from modules.parser.models import Problem
 from modules.polygon.client import PolygonClient
+from modules.parser import gemini_codegen
 
 
 def gen_dummy_solution(examples: list) -> str:
@@ -89,6 +90,10 @@ async def upload_problem(
     problem: Problem,
     lang: str = "english",
     on_log: Optional[Callable[[str], Awaitable[None]]] = None,
+    gen_solution: bool = False,
+    gen_tests: bool = False,
+    gemini_api_key: str = "",
+    gemini_model: str = "gemini-2.0-flash",
 ) -> dict:
     """
     Upload a single problem to Polygon.
@@ -290,6 +295,40 @@ async def upload_problem(
         message="Auto upload by polygon-uploader",
     )
     await log("✅ Commit thành công!")
+
+    # ── 8. AI Codegen (optional) ──
+    if (gen_solution or gen_tests) and gemini_api_key:
+        if gen_solution:
+            await log("🤖 Gen solution C++ bằng Gemini...")
+            try:
+                sol_code = await gemini_codegen.gen_solution(problem, gemini_api_key, gemini_model)
+                if sol_code:
+                    await client.call(
+                        "problem.saveSolution",
+                        problemId=problem_id,
+                        name="solution.cpp",
+                        file=sol_code,
+                        tag="MA",
+                    )
+                    await log("✅ Solution C++ đã upload")
+            except Exception as e:
+                await log(f"⚠️ Gen solution thất bại: {e}")
+
+        if gen_tests:
+            await log("🤖 Gen test generator C++ bằng Gemini...")
+            try:
+                gen_code = await gemini_codegen.gen_generator(problem, gemini_api_key, gemini_model)
+                if gen_code:
+                    await client.call(
+                        "problem.saveFile",
+                        problemId=problem_id,
+                        type="source",
+                        name="gen.cpp",
+                        file=gen_code,
+                    )
+                    await log("✅ Test generator đã upload")
+            except Exception as e:
+                await log(f"⚠️ Gen test generator thất bại: {e}")
 
     # ── 8. Build package ──
     await log("Tạo package (Standard)...")

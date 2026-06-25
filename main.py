@@ -89,6 +89,8 @@ async def startup():
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
         "g4f_delay": float(os.getenv("G4F_DELAY", "15")),
         "parse_delay": float(os.getenv("PARSE_DELAY", "15")),
+        "gen_solution": os.getenv("GEN_SOLUTION", "false").lower() == "true",
+        "gen_tests": os.getenv("GEN_TESTS", "false").lower() == "true",
         "lang": "english",
         "level": "lv1",
         "contest_name": "",
@@ -156,6 +158,8 @@ class SaveConfigRequest(BaseModel):
     ollama_url: str = "http://localhost:11434"
     g4f_delay: float = 15.0
     parse_delay: float = 15.0
+    gen_solution: bool = False
+    gen_tests: bool = False
     lang: str = "vietnamese"
     level: str = "lv1"
     contest_name: str = ""
@@ -178,6 +182,8 @@ async def save_config(req: SaveConfigRequest):
     state.config["ollama_url"] = req.ollama_url
     state.config["g4f_delay"] = req.g4f_delay
     state.config["parse_delay"] = req.parse_delay
+    state.config["gen_solution"] = req.gen_solution
+    state.config["gen_tests"] = req.gen_tests
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
@@ -559,7 +565,15 @@ async def _upload_task(indices: list[int], api_key: str, secret: str):
                         "message": msg,
                     })
 
-                result = await upload_problem(client, problem, lang=lang, on_log=on_log)
+                result = await upload_problem(
+                    client, problem,
+                    lang=lang,
+                    on_log=on_log,
+                    gen_solution=state.config.get("gen_solution", False),
+                    gen_tests=state.config.get("gen_tests", False),
+                    gemini_api_key=state.config.get("gemini_api_key", ""),
+                    gemini_model=state.config.get("gemini_model", "gemini-2.0-flash"),
+                )
 
                 entry["status"] = "uploaded"
                 await state.log_queue.put({
