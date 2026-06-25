@@ -184,7 +184,6 @@ async def _gen_and_upload_tests(
                     testset="tests",
                     testIndex=test_index,
                     testInput=test_input,
-                    testGroup=str(st.index),   # gắn vào group = subtask index
                 )
                 test_index += 1
                 uploaded += 1
