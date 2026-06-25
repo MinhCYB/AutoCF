@@ -91,6 +91,7 @@ async def startup():
         "parse_delay": float(os.getenv("PARSE_DELAY", "15")),
         "gen_solution": os.getenv("GEN_SOLUTION", "false").lower() == "true",
         "gen_tests": os.getenv("GEN_TESTS", "false").lower() == "true",
+        "testlib_path": os.getenv("TESTLIB_PATH", ""),
         "lang": "english",
         "level": "lv1",
         "contest_name": "",
@@ -160,6 +161,7 @@ class SaveConfigRequest(BaseModel):
     parse_delay: float = 15.0
     gen_solution: bool = False
     gen_tests: bool = False
+    testlib_path: str = ""
     lang: str = "vietnamese"
     level: str = "lv1"
     contest_name: str = ""
@@ -184,18 +186,35 @@ async def save_config(req: SaveConfigRequest):
     state.config["parse_delay"] = req.parse_delay
     state.config["gen_solution"] = req.gen_solution
     state.config["gen_tests"] = req.gen_tests
+    if req.testlib_path:  # chỉ update nếu có giá trị, tránh xoá path cũ
+        state.config["testlib_path"] = req.testlib_path
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
     state.config["start_index"] = req.start_index
 
-    # Persist to .env
+    # Persist to .env — đọc file cũ trước, merge, rồi ghi lại
+    # Tránh xóa các key không được gửi lên từ UI (vd: TESTLIB_PATH)
     env_path = Path(__file__).parent / ".env"
-    lines = [
-        f'POLYGON_API_KEY={state.config["polygon_api_key"]}',
-        f'POLYGON_SECRET={state.config["polygon_secret"]}',
-        f'GEMINI_API_KEY={state.config["gemini_api_key"]}',
-    ]
+    existing = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                existing[k.strip()] = v.strip()
+    # Merge: chỉ overwrite key nào có giá trị thật trong state.config
+    def _val(key, val):
+        # Không ghi đè nếu val rỗng và key đã có giá trị cũ
+        if not val and key in existing:
+            return existing[key]
+        return val
+    existing["POLYGON_API_KEY"]  = _val("POLYGON_API_KEY",  state.config["polygon_api_key"])
+    existing["POLYGON_SECRET"]   = _val("POLYGON_SECRET",   state.config["polygon_secret"])
+    existing["GEMINI_API_KEY"]   = _val("GEMINI_API_KEY",   state.config["gemini_api_key"])
+    existing["TESTLIB_PATH"]     = _val("TESTLIB_PATH",     state.config.get("testlib_path", ""))
+    existing["GEN_TESTS"]        = "true" if state.config["gen_tests"] else "false"
+    existing["GEN_SOLUTION"]     = "true" if state.config["gen_solution"] else "false"
+    lines = [f"{k}={v}" for k, v in existing.items()]
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     return {"status": "ok"}
@@ -483,6 +502,158 @@ async def update_problem(idx: int, req: UpdateProblemRequest):
     return {"status": "ok", "problem": prob}
 
 
+# ─── API: Set Subtasks ─────────────────────────────────
+
+class SubtaskInput(BaseModel):
+    index: int
+    score: int = 0
+    constraints: str = ""
+    n_tests: int = 5
+
+class SetSubtasksRequest(BaseModel):
+    problem_index: int
+    subtasks: list[SubtaskInput]
+
+@app.post("/api/set-subtasks")
+async def set_subtasks(req: SetSubtasksRequest):
+    """
+    Manually set subtasks for a problem (used when AI cannot detect them).
+    Call this before /api/upload.
+    """
+    from modules.parser.models import Subtask
+
+    entry = state.problems.get(req.problem_index)
+    if not entry:
+        return JSONResponse({"error": f"Không tìm thấy bài #{req.problem_index}"}, status_code=404)
+
+    subtasks = [
+        Subtask(
+            index=st.index,
+            score=st.score,
+            constraints=st.constraints,
+            n_tests=st.n_tests,
+        )
+        for st in req.subtasks
+    ]
+
+    # Merge subtasks into stored problem data
+    entry["problem"]["subtasks"] = [st.model_dump() for st in subtasks]
+
+    return {
+        "status": "ok",
+        "problem_index": req.problem_index,
+        "subtasks": [st.model_dump() for st in subtasks],
+    }
+
+
+@app.get("/api/get-subtasks/{problem_index}")
+async def get_subtasks(problem_index: int):
+    """Get current subtasks for a problem (either AI-detected or manually set)."""
+    entry = state.problems.get(problem_index)
+    if not entry:
+        return JSONResponse({"error": f"Không tìm thấy bài #{problem_index}"}, status_code=404)
+
+    return {
+        "problem_index": problem_index,
+        "subtasks": entry["problem"].get("subtasks", []),
+    }
+
+
+
+# ─── API: Gen Test Preview ────────────────────────────
+
+@app.post("/api/gen-test-preview/{problem_index}")
+async def gen_test_preview(problem_index: int):
+    """
+    AI gen subtasks + compile local + chạy generator → trả về test inputs để preview.
+    Subtasks được lưu lại vào problem để upload dùng lại (không gen lại).
+    """
+    from modules.parser import g4f_codegen
+    from modules.parser.models import Subtask
+    from modules.polygon.test_runner import compile_and_run, CompileError, RunError
+
+    entry = state.problems.get(problem_index)
+    if not entry:
+        return JSONResponse({"error": f"Không tìm thấy bài #{problem_index}"}, status_code=404)
+
+    problem = Problem(**entry["problem"])
+    gemini_api_key = state.config.get("gemini_api_key", "")
+    gemini_model   = state.config.get("gemini_model", "gemini-2.0-flash")
+    testlib_path   = state.config.get("testlib_path", "") or problem.testlib_path
+
+    if not testlib_path:
+        return JSONResponse({"error": "Chưa cấu hình testlib_path"}, status_code=400)
+
+    # ── 1. Lấy subtasks (ưu tiên đã có sẵn) ──────────────────────────────────
+    subtasks = problem.subtasks
+    if not subtasks:
+        try:
+            subtasks = await g4f_codegen.gen_subtasks(problem, gemini_api_key, gemini_model)
+        except Exception as e:
+            return JSONResponse({"error": f"AI gen subtask thất bại: {e}"}, status_code=500)
+
+    if not subtasks:
+        return JSONResponse({
+            "error": "no_subtasks",
+            "message": "AI không phát hiện subtask. Hãy nhập thủ công."
+        }, status_code=422)
+
+    # Lưu subtasks vào problem để upload dùng lại
+    entry["problem"]["subtasks"] = [st.model_dump() for st in subtasks]
+
+    # ── 2. Gen + compile + run từng subtask ──────────────────────────────────
+    results = []
+    for st in subtasks:
+        result_entry = {
+            "subtask_index": st.index,
+            "score": st.score,
+            "constraints": st.constraints,
+            "n_tests": st.n_tests,
+            "tests": [],
+            "error": None,
+        }
+
+        MAX_GEN_RETRIES = 3
+        last_error = None
+        compile_error_hint = None
+        for gen_attempt in range(MAX_GEN_RETRIES):
+            try:
+                gen_code = await g4f_codegen.gen_generator_for_subtask(
+                    problem, st, gemini_api_key, gemini_model,
+                    compile_error_hint=compile_error_hint,
+                )
+                inputs = await compile_and_run(
+                    gen_code=gen_code,
+                    n_tests=st.n_tests,
+                    testlib_path=testlib_path,
+                    seed_offset=(st.index - 1) * 100,
+                )
+                # Cache gen_code vào entry để upload không gen lại
+                if "gen_codes" not in entry:
+                    entry["gen_codes"] = {}
+                entry["gen_codes"][str(st.index)] = gen_code
+                entry["test_inputs"] = entry.get("test_inputs", {})
+                entry["test_inputs"][str(st.index)] = inputs
+                result_entry["tests"] = inputs
+                last_error = None
+                break  # thành công → thoát retry loop
+            except (CompileError, RunError) as e:
+                last_error = e
+                compile_error_hint = str(e)[:600]  # truyền lỗi cho lần gen tiếp
+            except (FileNotFoundError, EnvironmentError) as e:
+                last_error = e
+                break  # lỗi env thì retry vô ích
+        if last_error:
+            result_entry["error"] = str(last_error)
+
+        results.append(result_entry)
+
+    return {
+        "problem_index": problem_index,
+        "subtasks": results,
+    }
+
+
 # ─── API: Upload ──────────────────────────────────────
 
 class UploadRequest(BaseModel):
@@ -573,6 +744,8 @@ async def _upload_task(indices: list[int], api_key: str, secret: str):
                     gen_tests=state.config.get("gen_tests", False),
                     gemini_api_key=state.config.get("gemini_api_key", ""),
                     gemini_model=state.config.get("gemini_model", "gemini-2.0-flash"),
+                    testlib_path=state.config.get("testlib_path", ""),
+                    cached_test_inputs=entry.get("test_inputs"),  # từ gen-test-preview
                 )
 
                 entry["status"] = "uploaded"

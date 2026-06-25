@@ -19,6 +19,7 @@ from typing import Awaitable, Callable, Optional
 from modules.parser.models import Problem
 from modules.polygon.client import PolygonClient
 from modules.parser import g4f_codegen # g4f backend, drop-in replacement
+from modules.polygon.test_runner import compile_and_run, CompileError, RunError
 
 
 def gen_dummy_solution(examples: list) -> str:
@@ -86,6 +87,115 @@ def gen_dummy_solution(examples: list) -> str:
     return "\n".join(lines)
 
 
+async def _gen_and_upload_tests(
+    client: PolygonClient,
+    problem: Problem,
+    problem_id: int,
+    testlib_path: str,
+    gemini_api_key: str,
+    gemini_model: str,
+    log,
+    cached_inputs: dict | None = None,   # {subtask_index_str: [input_str, ...]} từ preview
+) -> None:
+    """
+    Gen test theo subtask:
+      1. Lấy subtasks từ problem (đã được set sẵn, hoặc AI tự extract)
+      2. Với mỗi subtask: AI gen gen.cpp → compile local → chạy → upload tests
+    """
+    from modules.parser.models import Subtask
+
+    # Validate testlib_path sớm để báo lỗi rõ ràng
+    if not testlib_path:
+        await log("⚠️ Chưa cung cấp testlib_path — bỏ qua gen test")
+        return
+
+    # ── Lấy subtask list ──────────────────────────────────────────────────────
+    subtasks = problem.subtasks
+
+    if not subtasks:
+        # AI chưa extract → thử extract từ đề
+        await log("🤖 AI đang phân tích subtask từ đề bài...")
+        try:
+            subtasks = await g4f_codegen.gen_subtasks(problem, gemini_api_key, gemini_model)
+        except Exception as e:
+            await log(f"⚠️ AI không extract được subtask: {e}")
+            subtasks = []
+
+        if not subtasks:
+            # Đề không có subtask rõ ràng → caller phải set problem.subtasks trước
+            await log(
+                "⚠️ Không phát hiện subtask trong đề. "
+                "Hãy set problem.subtasks thủ công rồi upload lại "
+                "(hoặc dùng API /set-subtasks trước khi upload)."
+            )
+            return
+
+    await log(f"📋 Phát hiện {len(subtasks)} subtask:")
+    for st in subtasks:
+        await log(f"   Subtask {st.index} ({st.score} điểm): {st.constraints} — {st.n_tests} test")
+
+    # ── Gen + upload từng subtask ─────────────────────────────────────────────
+    # test index tiếp theo sau các example tests
+    test_index = len(problem.examples) + 1
+
+    for st in subtasks:
+        await log(f"\n🔧 Subtask {st.index}: {st.constraints}")
+
+        # Gen gen.cpp cho subtask này
+        await log(f"   🤖 AI gen generator cho subtask {st.index}...")
+        try:
+            gen_code = await g4f_codegen.gen_generator_for_subtask(
+                problem, st, gemini_api_key, gemini_model
+            )
+        except Exception as e:
+            await log(f"   ❌ Gen generator thất bại: {e} — bỏ qua subtask {st.index}")
+            continue
+
+        # Compile + chạy local (hoặc dùng cache từ preview)
+        cached_key = str(st.index)
+        if cached_inputs and cached_key in cached_inputs:
+            inputs = cached_inputs[cached_key]
+            await log(f"   ♻️  Dùng {len(inputs)} test đã gen từ preview (bỏ qua compile)")
+        else:
+            try:
+                seed_offset = (st.index - 1) * 100
+                inputs = await compile_and_run(
+                    gen_code=gen_code,
+                    n_tests=st.n_tests,
+                    testlib_path=testlib_path,
+                    seed_offset=seed_offset,
+                    on_log=lambda msg: log(f"   {msg}"),
+                )
+            except (CompileError, RunError, FileNotFoundError, EnvironmentError) as e:
+                await log(f"   ❌ Lỗi local runner: {e} — bỏ qua subtask {st.index}")
+                continue
+
+        if not inputs:
+            await log(f"   ⚠️ Không sinh được test nào cho subtask {st.index}")
+            continue
+
+        # Upload từng test lên Polygon
+        uploaded = 0
+        for test_input in inputs:
+            try:
+                await client.call(
+                    "problem.saveTest",
+                    problemId=problem_id,
+                    testset="tests",
+                    testIndex=test_index,
+                    testInput=test_input,
+                    testGroup=str(st.index),   # gắn vào group = subtask index
+                )
+                test_index += 1
+                uploaded += 1
+            except Exception as e:
+                await log(f"   ⚠️ Upload test {test_index} thất bại: {e}")
+
+        await log(f"   ✅ Subtask {st.index}: upload {uploaded}/{len(inputs)} test (index {test_index - uploaded}–{test_index - 1})")
+
+    await log(f"\n✅ Gen test hoàn tất — tổng {test_index - len(problem.examples) - 1} test đã upload")
+
+
 async def upload_problem(
     client: PolygonClient,
     problem: Problem,
@@ -95,6 +205,8 @@ async def upload_problem(
     gen_tests: bool = False,
     gemini_api_key: str = "",
     gemini_model: str = "gemini-2.0-flash",
+    testlib_path: str = "",
+    cached_test_inputs: dict | None = None,
 ) -> dict:
     """
     Upload a single problem to Polygon.
@@ -287,42 +399,35 @@ async def upload_problem(
         )
         await log(f"✅ Tags: {', '.join(problem.tags)}")
 
-    # ── 7. AI Codegen (optional) — chạy TRƯỚC commit để được include vào package ──
-    _codegen_done = False
-    if (gen_solution or gen_tests) and gemini_api_key:
-        if gen_solution:
-            await log("🤖 Gen solution C++ bằng DeepSeek (g4f)...")
-            try:
-                sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key, gemini_model)
-                if sol_code:
-                    await client.call(
-                        "problem.saveSolution",
-                        problemId=problem_id,
-                        name="solution.cpp",
-                        file=sol_code,
-                        tag="MA",
-                    )
-                    await log("✅ Solution C++ đã upload")
-                    _codegen_done = True
-            except Exception as e:
-                await log(f"⚠️ Gen solution thất bại: {e}")
+    # ── 7. AI Codegen (optional) — chạy TRƯỚC commit ──────────────────────────
+    # Cả gen_solution lẫn gen_tests đều dùng g4f (DeepSeek), không cần gemini_api_key
+    if gen_solution:
+        await log("🤖 Gen solution C++ bằng DeepSeek (g4f)...")
+        try:
+            sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key, gemini_model)
+            if sol_code:
+                await client.call(
+                    "problem.saveSolution",
+                    problemId=problem_id,
+                    name="solution.cpp",
+                    file=sol_code,
+                    tag="MA",
+                )
+                await log("✅ Solution C++ đã upload")
+        except Exception as e:
+            await log(f"⚠️ Gen solution thất bại: {e}")
 
-        if gen_tests:
-            await log("🤖 Gen test generator C++ bằng DeepSeek (g4f)...")
-            try:
-                gen_code = await g4f_codegen.gen_generator(problem, gemini_api_key, gemini_model)
-                if gen_code:
-                    await client.call(
-                        "problem.saveFile",
-                        problemId=problem_id,
-                        type="source",
-                        name="gen.cpp",
-                        file=gen_code,
-                    )
-                    await log("✅ Test generator đã upload")
-                    _codegen_done = True
-            except Exception as e:
-                await log(f"⚠️ Gen test generator thất bại: {e}")
+    if gen_tests:
+        await _gen_and_upload_tests(
+            client=client,
+            problem=problem,
+            problem_id=problem_id,
+            testlib_path=testlib_path or problem.testlib_path,
+            gemini_api_key=gemini_api_key,
+            gemini_model=gemini_model,
+            log=log,
+            cached_inputs=cached_test_inputs,
+        )
 
     # ── 8. Commit — sau khi đã có đủ solution/generator ──
     await log("Commit changes...")

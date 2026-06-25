@@ -179,6 +179,21 @@
             <div id="files-info" class="text-sm text-muted"></div>
         </div>
 
+        <!-- Gen Test Preview -->
+        <div class="card mt-4" id="gen-test-card">
+            <div class="card-header">
+                <div class="card-icon" style="background:rgba(168,85,247,.15);color:#a855f7">🧪</div>
+                <div>
+                    <div class="card-title">Gen Test Preview</div>
+                    <div class="card-desc" id="gen-test-desc">Sinh test local theo subtask trước khi upload</div>
+                </div>
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-ghost btn-sm" id="btn-gen-test" onclick="genTestPreview()">⚡ Gen Test</button>
+                </div>
+            </div>
+            <div id="gen-test-body" style="display:none;margin-top:8px"></div>
+        </div>
+
         <!-- Action buttons -->
         <div class="actions-bar">
             <button class="btn btn-ghost" onclick="skipProblem()">⏭ Skip</button>
@@ -355,6 +370,13 @@ function removeExample(i) {
 // ─── Navigation ───
 function navigate(delta) {
     saveCurrent();
+    // Reset gen test card
+    const body = document.getElementById('gen-test-body');
+    const desc = document.getElementById('gen-test-desc');
+    const btn  = document.getElementById('btn-gen-test');
+    if (body) { body.style.display = 'none'; body.innerHTML = ''; }
+    if (desc) desc.textContent = 'Sinh test local theo subtask trước khi upload';
+    if (btn)  { btn.disabled = false; btn.textContent = '⚡ Gen Test'; }
     showProblem(currentIdx + delta);
 }
 
@@ -384,6 +406,118 @@ function saveCurrent() {
             output: outputs[i].value,
         });
     }
+}
+
+// ─── Gen Test Preview ───
+async function genTestPreview() {
+    const idx = problems[currentIdx].index;
+    const btn = document.getElementById('btn-gen-test');
+    const body = document.getElementById('gen-test-body');
+    const desc = document.getElementById('gen-test-desc');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang gen...';
+    desc.textContent = 'AI đang phân tích subtask và compile generator...';
+    body.style.display = 'none';
+    body.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/gen-test-preview/${idx}`, { method: 'POST' });
+        const data = await resp.json();
+
+        if (!resp.ok) {
+            if (data.error === 'no_subtasks') {
+                desc.textContent = '⚠️ Không phát hiện subtask — nhập thủ công bên dưới';
+                body.style.display = 'block';
+                body.innerHTML = renderManualSubtaskForm(idx);
+            } else {
+                desc.textContent = '❌ ' + (data.error || 'Lỗi không xác định');
+            }
+            return;
+        }
+
+        // Render kết quả
+        desc.textContent = `✅ Đã gen ${data.subtasks.length} subtask`;
+        body.style.display = 'block';
+        body.innerHTML = data.subtasks.map(st => renderSubtaskResult(st)).join('');
+
+        // Lưu subtasks vào problem local để confirm mang theo
+        problems[currentIdx].problem.subtasks = data.subtasks.map(st => ({
+            index: st.subtask_index,
+            score: st.score,
+            constraints: st.constraints,
+            n_tests: st.n_tests,
+        }));
+
+    } catch(e) {
+        desc.textContent = '❌ ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Gen lại';
+    }
+}
+
+function renderSubtaskResult(st) {
+    const header = `<div style="font-weight:600;margin-bottom:6px;color:var(--text)">
+        Subtask ${st.subtask_index}
+        ${st.score ? `<span style="color:var(--text-muted);font-weight:400"> · ${st.score} điểm</span>` : ''}
+        <span style="color:var(--text-muted);font-weight:400;font-size:12px"> — ${escHtml(st.constraints)}</span>
+        ${st.error ? `<span style="color:var(--error);font-size:12px"> ❌ ${escHtml(st.error)}</span>` : `<span style="color:var(--success);font-size:12px"> ✅ ${st.tests.length} test</span>`}
+    </div>`;
+
+    if (st.error || !st.tests.length) return `<div style="margin-bottom:12px">${header}</div>`;
+
+    const tests = st.tests.map((t, i) => `
+        <details style="margin-bottom:4px">
+            <summary style="cursor:pointer;font-size:12px;color:var(--text-muted);padding:2px 0">
+                Test ${i + 1}
+            </summary>
+            <pre style="font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;margin:4px 0;overflow-x:auto;white-space:pre-wrap;max-height:120px;overflow-y:auto">${escHtml(t.trim())}</pre>
+        </details>
+    `).join('');
+
+    return `<div style="margin-bottom:16px;padding:10px;border:1px solid var(--border);border-radius:8px">${header}${tests}</div>`;
+}
+
+function renderManualSubtaskForm(problemIdx) {
+    return `
+    <div id="manual-subtask-form">
+        <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px">
+            Nhập subtask thủ công (mỗi dòng: <code>score | constraints | n_tests</code>):
+        </div>
+        <textarea id="manual-subtask-input" rows="4" style="width:100%;font-family:monospace;font-size:13px"
+            placeholder="20 | 1 ≤ n ≤ 100 | 5&#10;30 | 1 ≤ n ≤ 1000 | 5&#10;50 | 1 ≤ n ≤ 100000 | 5"></textarea>
+        <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="submitManualSubtasks(${problemIdx})">
+            ✅ Lưu & Gen
+        </button>
+    </div>`;
+}
+
+async function submitManualSubtasks(problemIdx) {
+    const raw = document.getElementById('manual-subtask-input').value.trim();
+    const lines = raw.split('\n').filter(l => l.trim());
+    const subtasks = lines.map((line, i) => {
+        const parts = line.split('|').map(s => s.trim());
+        return {
+            index: i + 1,
+            score: parseInt(parts[0]) || 0,
+            constraints: parts[1] || '',
+            n_tests: parseInt(parts[2]) || 5,
+        };
+    });
+
+    if (!subtasks.length) return;
+
+    // Save subtasks rồi gen lại
+    await fetch('/api/set-subtasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ problem_index: problemIdx, subtasks }),
+    });
+
+    // Lưu local rồi trigger gen
+    problems[currentIdx].problem.subtasks = subtasks;
+    await genTestPreview();
 }
 
 // ─── Actions ───

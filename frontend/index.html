@@ -104,6 +104,10 @@
                 <label for="gen-tests" style="margin:0;font-weight:500">🤖 Gen test generator C++</label>
             </div>
         </div>
+        <div class="form-group" style="margin-top:8px" id="testlib-path-group">
+            <label for="testlib-path" style="font-size:12px;color:#888">📁 Đường dẫn testlib.h (cần cho Gen Test)</label>
+            <input type="text" id="testlib-path" placeholder="C:\testlib\testlib.h hoặc /home/user/testlib/testlib.h">
+        </div>
         <div class="field-notice" style="margin-top:4px;font-size:12px;color:#888">Dùng Gemini API key để gen — chỉ gửi text đề, không gửi ảnh</div>
         <!-- Ollama fields -->
         <div id="parser-ollama-fields" style="display:none">
@@ -254,6 +258,7 @@ let scanResults = [];
     if (saved.parse_delay) document.getElementById('parse-delay').value = saved.parse_delay;
     if (saved.gen_solution) document.getElementById('gen-solution').checked = saved.gen_solution;
     if (saved.gen_tests) document.getElementById('gen-tests').checked = saved.gen_tests;
+    if (saved.testlib_path) document.getElementById('testlib-path').value = saved.testlib_path;
     if (saved.folder_path) {
         document.getElementById('folder-path').value = saved.folder_path;
         document.getElementById('btn-scan').disabled = false;
@@ -277,6 +282,7 @@ let scanResults = [];
         if (!saved.parse_delay && config.parse_delay) document.getElementById('parse-delay').value = config.parse_delay;
         if (config.gen_solution) document.getElementById('gen-solution').checked = config.gen_solution;
         if (config.gen_tests) document.getElementById('gen-tests').checked = config.gen_tests;
+        if (config.testlib_path) document.getElementById('testlib-path').value = config.testlib_path;
 
         // Show key status from .env
         const polygonStatus = document.getElementById('polygon-status');
@@ -337,6 +343,7 @@ function saveConfigLocal() {
         parse_delay: parseFloat(document.getElementById('parse-delay').value) || 15,
         gen_solution: document.getElementById('gen-solution').checked,
         gen_tests: document.getElementById('gen-tests').checked,
+        testlib_path: document.getElementById('testlib-path').value.trim(),
         level: document.getElementById('level').value,
         contest_name: document.getElementById('contest-name').value,
         start_index: document.getElementById('start-index').value,
@@ -646,6 +653,7 @@ async function saveConfigToServer() {
             parse_delay: parseFloat(document.getElementById('parse-delay').value) || 15,
             gen_solution: document.getElementById('gen-solution').checked,
             gen_tests: document.getElementById('gen-tests').checked,
+            testlib_path: document.getElementById('testlib-path').value.trim(),
             lang: document.getElementById('lang').value,
             level: document.getElementById('level').value,
             contest_name: document.getElementById('contest-name').value,

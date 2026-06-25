@@ -13,6 +13,17 @@ class Example(BaseModel):
     output: str
 
 
+class Subtask(BaseModel):
+    """
+    A single subtask with its constraints and test count.
+    AI extracts these from the problem statement.
+    """
+    index: int                  # 1-based subtask number
+    score: int = 0              # points for this subtask (0 if not applicable)
+    constraints: str = ""       # human-readable constraint string, e.g. "1 ≤ n ≤ 100"
+    n_tests: int = 5            # number of tests to generate for this subtask
+
+
 class Problem(BaseModel):
     """
     Complete problem representation for Polygon upload.
@@ -38,9 +49,13 @@ class Problem(BaseModel):
     # --- Tags ---
     tags: list[str] = []
 
+    # --- Subtasks (populated by AI or user) ---
+    subtasks: list[Subtask] = []
+
     # --- Optional file paths ---
     solution_path: str = ""
     tests_dir: str = ""
+    testlib_path: str = ""      # path to testlib.h on local machine
 
     @field_validator("time_limit")
     @classmethod
