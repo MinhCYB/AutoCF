@@ -18,7 +18,7 @@ from typing import Awaitable, Callable, Optional
 
 from modules.parser.models import Problem
 from modules.polygon.client import PolygonClient
-from modules.parser import g4f_codegen # g4f backend, drop-in replacement
+from modules.parser import groq_codegen as g4f_codegen  # groq backend, drop-in replacement
 from modules.polygon.test_runner import compile_and_run, CompileError, RunError
 
 
@@ -91,88 +91,45 @@ async def _gen_and_upload_tests(
     client: PolygonClient,
     problem: Problem,
     problem_id: int,
-    testlib_path: str,
-    gemini_api_key: str,
-    gemini_model: str,
     log,
     cached_inputs: dict | None = None,   # {subtask_index_str: [input_str, ...]} từ preview
 ) -> None:
     """
-    Gen test theo subtask:
-      1. Lấy subtasks từ problem (đã được set sẵn, hoặc AI tự extract)
-      2. Với mỗi subtask: AI gen gen.cpp → compile local → chạy → upload tests
+    Upload tests từ cache preview lên Polygon.
+    Không gọi AI ở đây — AI gen đã xảy ra ở bước preview, user đã confirm.
     """
-    from modules.parser.models import Subtask
-
-    # Validate testlib_path sớm để báo lỗi rõ ràng
-    if not testlib_path:
-        await log("⚠️ Chưa cung cấp testlib_path — bỏ qua gen test")
+    if not cached_inputs:
+        await log("⚠️ Không có test từ preview — bỏ qua upload test. Hãy Gen Test Preview trước.")
         return
 
-    # ── Lấy subtask list ──────────────────────────────────────────────────────
-    subtasks = problem.subtasks
-
-    if not subtasks:
-        # AI chưa extract → thử extract từ đề
-        await log("🤖 AI đang phân tích subtask từ đề bài...")
-        try:
-            subtasks = await g4f_codegen.gen_subtasks(problem, gemini_api_key, gemini_model)
-        except Exception as e:
-            await log(f"⚠️ AI không extract được subtask: {e}")
-            subtasks = []
-
-        if not subtasks:
-            # Đề không có subtask rõ ràng → caller phải set problem.subtasks trước
-            await log(
-                "⚠️ Không phát hiện subtask trong đề. "
-                "Hãy set problem.subtasks thủ công rồi upload lại "
-                "(hoặc dùng API /set-subtasks trước khi upload)."
-            )
-            return
-
-    await log(f"📋 Phát hiện {len(subtasks)} subtask:")
-    for st in subtasks:
-        await log(f"   Subtask {st.index} ({st.score} điểm): {st.constraints} — {st.n_tests} test")
-
-    # ── Gen + upload từng subtask ─────────────────────────────────────────────
-    # test index tiếp theo sau các example tests
+    subtasks = problem.subtasks or []
     test_index = len(problem.examples) + 1
 
-    for st in subtasks:
-        await log(f"\n🔧 Subtask {st.index}: {st.constraints}")
+    for cached_key, inputs in cached_inputs.items():
+        st_label = f"Subtask {cached_key}"
+        # Tìm subtask tương ứng để lấy label
+        for st in subtasks:
+            if str(st.index) == cached_key:
+                st_label = f"Subtask {st.index} ({st.constraints})"
+                break
 
-        # Gen gen.cpp cho subtask này
-        await log(f"   🤖 AI gen generator cho subtask {st.index}...")
-        try:
-            gen_code = await g4f_codegen.gen_generator_for_subtask(
-                problem, st, gemini_api_key, gemini_model
-            )
-        except Exception as e:
-            await log(f"   ❌ Gen generator thất bại: {e} — bỏ qua subtask {st.index}")
-            continue
-
-        # Compile + chạy local (hoặc dùng cache từ preview)
-        cached_key = str(st.index)
-        if cached_inputs and cached_key in cached_inputs:
-            inputs = cached_inputs[cached_key]
-            await log(f"   ♻️  Dùng {len(inputs)} test đã gen từ preview (bỏ qua compile)")
-        else:
-            try:
-                seed_offset = (st.index - 1) * 100
-                inputs = await compile_and_run(
-                    gen_code=gen_code,
-                    n_tests=st.n_tests,
-                    testlib_path=testlib_path,
-                    seed_offset=seed_offset,
-                    on_log=lambda msg: log(f"   {msg}"),
-                )
-            except (CompileError, RunError, FileNotFoundError, EnvironmentError) as e:
-                await log(f"   ❌ Lỗi local runner: {e} — bỏ qua subtask {st.index}")
-                continue
+        await log(f"\n🔧 Upload {st_label}...")
 
         if not inputs:
-            await log(f"   ⚠️ Không sinh được test nào cho subtask {st.index}")
+            await log(f"   ⚠️ Không có test")
             continue
+
+        # Deduplicate
+        seen = set()
+        unique_inputs = []
+        for t in inputs:
+            key = t.strip()
+            if key not in seen:
+                seen.add(key)
+                unique_inputs.append(t)
+        if len(unique_inputs) < len(inputs):
+            await log(f"   ℹ️ Bỏ {len(inputs) - len(unique_inputs)} test trùng")
+        inputs = unique_inputs
 
         # Upload từng test lên Polygon
         uploaded = 0
@@ -401,9 +358,9 @@ async def upload_problem(
     # ── 7. AI Codegen (optional) — chạy TRƯỚC commit ──────────────────────────
     # Cả gen_solution lẫn gen_tests đều dùng g4f (DeepSeek), không cần gemini_api_key
     if gen_solution:
-        await log("🤖 Gen solution C++ bằng DeepSeek (g4f)...")
+        await log("🤖 Gen solution C++ bằng Groq...")
         try:
-            sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key, gemini_model)
+            sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key)
             if sol_code:
                 await client.call(
                     "problem.saveSolution",
@@ -421,9 +378,6 @@ async def upload_problem(
             client=client,
             problem=problem,
             problem_id=problem_id,
-            testlib_path=testlib_path or problem.testlib_path,
-            gemini_api_key=gemini_api_key,
-            gemini_model=gemini_model,
             log=log,
             cached_inputs=cached_test_inputs,
         )

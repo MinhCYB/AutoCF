@@ -41,6 +41,11 @@ CHỈ trả về JSON, không giải thích thêm.
   "notes": "...",
   "examples": [
     { "input": "...", "output": "..." }
+  ],
+  "subtasks": [
+    { "index": 1, "score": 20, "constraints": "1 ≤ n ≤ 100", "n_tests": 5 },
+    { "index": 2, "score": 30, "constraints": "1 ≤ n ≤ 1000", "n_tests": 5 },
+    { "index": 3, "score": 50, "constraints": "1 ≤ n ≤ 100000", "n_tests": 5 }
   ]
 }
 
@@ -52,7 +57,9 @@ Lưu ý:
 - input_format mô tả định dạng input
 - output_format mô tả định dạng output
 - notes chứa ghi chú thêm (nếu có), để "" nếu không có
-- examples là danh sách các ví dụ input/output"""
+- examples là danh sách các ví dụ input/output
+- subtasks: nếu đề có subtask/scoring rõ ràng thì điền đầy đủ; nếu KHÔNG có subtask thì để mảng rỗng []
+- n_tests trong subtask luôn là 5"""
 
 
 def _format_api_error(error: Exception) -> str:
@@ -243,6 +250,20 @@ async def parse_problem(
     memory_limit = data.get("memory_limit", 256)
     memory_limit = max(4, min(1024, memory_limit))
 
+    # Parse subtasks nếu có
+    from modules.parser.models import Subtask
+    subtasks = []
+    for i, st in enumerate(data.get("subtasks", []), 1):
+        try:
+            subtasks.append(Subtask(
+                index=int(st.get("index", i)),
+                score=int(st.get("score", 0)),
+                constraints=str(st.get("constraints", "")),
+                n_tests=int(st.get("n_tests", 5)),
+            ))
+        except Exception:
+            pass
+
     return Problem(
         title=data.get("title", ""),
         time_limit=time_limit,
@@ -252,4 +273,5 @@ async def parse_problem(
         output_format=data.get("output_format", ""),
         notes=data.get("notes", ""),
         examples=examples,
+        subtasks=subtasks if subtasks else [],
     )

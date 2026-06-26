@@ -293,6 +293,30 @@ function showProblem(idx) {
     if (prob.tests_dir) filesInfo.push(`📁 Tests: ${prob.tests_dir.split(/[\\/]/).pop()}/`);
     if (filesInfo.length === 0) filesInfo.push('Không có solution hoặc tests');
     document.getElementById('files-info').innerHTML = filesInfo.join('<br>');
+
+    // Subtasks — nếu đã extract lúc parse thì hiển thị luôn để user review
+    const body = document.getElementById('gen-test-body');
+    const desc = document.getElementById('gen-test-desc');
+    const btn  = document.getElementById('btn-gen-test');
+    body.innerHTML = '';
+    body.style.display = 'none';
+    if (prob.subtasks && prob.subtasks.length > 0) {
+        desc.textContent = `✅ ${prob.subtasks.length} subtask đã extract — review rồi bấm Gen Test`;
+        body.style.display = 'block';
+        body.innerHTML = `
+            <div style="margin-bottom:6px;font-size:12px;color:var(--text-muted)">Mỗi dòng: score | constraints | n_tests</div>
+            <textarea id="subtask-edit-area" rows="${prob.subtasks.length + 1}" style="width:100%;font-family:monospace;font-size:13px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary)">${prob.subtasks.map(st => `${st.score} | ${st.constraints} | ${st.n_tests}`).join('\n')}</textarea>
+        `;
+        if (btn) btn.textContent = '⚡ Gen Test';
+    } else {
+        desc.textContent = '⚠️ Không phát hiện subtask — nhập thủ công bên dưới';
+        body.style.display = 'block';
+        body.innerHTML = `
+            <div style="margin-bottom:6px;font-size:12px;color:var(--text-muted)">Mỗi dòng: <code>score | constraints | n_tests</code></div>
+            <textarea id="subtask-edit-area" rows="4" style="width:100%;font-family:monospace;font-size:13px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary)" placeholder="20 | 1 ≤ n ≤ 100 | 5&#10;30 | 1 ≤ n ≤ 1000 | 5&#10;50 | 1 ≤ n ≤ 100000 | 5"></textarea>
+        `;
+        if (btn) { btn.disabled = false; btn.textContent = '⚡ Gen Test'; }
+    }
 }
 
 function updatePreview() {
@@ -417,8 +441,30 @@ async function genTestPreview() {
 
     btn.disabled = true;
     btn.textContent = '⏳ Đang gen...';
-    desc.textContent = 'AI đang phân tích subtask và compile generator...';
+    desc.textContent = 'AI đang compile generator và sinh test...';
     body.style.display = 'none';
+
+    // Nếu user đã edit subtask trong textarea → save lại trước khi gen
+    const editArea = document.getElementById('subtask-edit-area');
+    if (editArea && editArea.value.trim()) {
+        const lines = editArea.value.trim().split('\n').filter(l => l.trim());
+        const subtasks = lines.map((line, i) => {
+            const parts = line.split('|').map(s => s.trim());
+            return {
+                index: i + 1,
+                score: parseInt(parts[0]) || 20,
+                constraints: parts[1] || '',
+                n_tests: parseInt(parts[2]) || 5,
+            };
+        });
+        problems[currentIdx].problem.subtasks = subtasks;
+        await fetch('/api/set-subtasks', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ problem_index: idx, subtasks }),
+        });
+    }
+
     body.innerHTML = '';
 
     try {

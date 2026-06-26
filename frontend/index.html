@@ -76,6 +76,12 @@
                     </select>
                 </div>
             </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="groq-key">Groq API Key <span style="font-size:11px;color:var(--text-muted)">(dùng cho gen test/solution — free 14,400 req/day)</span></label>
+                    <input type="password" id="groq-key" placeholder="Nhập Groq API Key...">
+                </div>
+            </div>
         </div>
         <!-- g4f fields -->
         <div id="parser-g4f-fields" style="display:none">
@@ -321,6 +327,7 @@ let scanResults = [];
     if (saved.polygon_key) document.getElementById('polygon-key').value = saved.polygon_key;
     if (saved.polygon_secret) document.getElementById('polygon-secret').value = saved.polygon_secret;
     if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
+        if (saved.groq_key) document.getElementById('groq-key').value = saved.groq_key;
 })();
 
 function onParserBackendChange() {
@@ -335,6 +342,7 @@ function saveConfigLocal() {
         polygon_key: document.getElementById('polygon-key').value,
         polygon_secret: document.getElementById('polygon-secret').value,
         gemini_key: document.getElementById('gemini-key').value,
+        groq_key: document.getElementById('groq-key').value,
         gemini_model: document.getElementById('gemini-model').value,
         parser_backend: document.getElementById('parser-backend').value,
         ollama_model: document.getElementById('ollama-model').value,
@@ -637,6 +645,7 @@ async function saveConfigToServer() {
     const polygonKey = document.getElementById('polygon-key').value;
     const polygonSecret = document.getElementById('polygon-secret').value;
     const geminiKey = document.getElementById('gemini-key').value;
+    const groqKey = document.getElementById('groq-key').value;
 
     await fetch('/api/save-config', {
         method: 'POST',
@@ -645,6 +654,7 @@ async function saveConfigToServer() {
             polygon_api_key: polygonKey,   // empty string = server keeps existing
             polygon_secret: polygonSecret,
             gemini_api_key: geminiKey,
+            groq_api_key: groqKey,
             gemini_model: document.getElementById('gemini-model').value,
             parser_backend: document.getElementById('parser-backend').value,
             ollama_model: document.getElementById('ollama-model').value,

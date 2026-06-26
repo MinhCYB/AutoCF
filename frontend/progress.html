@@ -135,23 +135,97 @@ let eventSource = null;
         document.getElementById('pre-upload-list').innerHTML = html;
 
     } catch (e) {
+        console.error('Init error:', e);
         document.getElementById('upload-summary').textContent = 'Lỗi: ' + e.message;
+        document.getElementById('btn-start-upload').disabled = false;
     }
 })();
 
 // ─── Start Upload ───
+function showDuplicateDialog(duplicates, actionsOut) {
+    return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+        const rows = duplicates.map(d => `
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+                <span style="font-weight:600;font-size:14px">${d.name}</span>
+                <div style="display:flex;gap:8px">
+                    <button onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.style.fontWeight='normal');this.style.fontWeight='bold';window._dupActions['${d.name}']='override'" 
+                        style="padding:4px 12px;border-radius:4px;border:1px solid var(--primary);background:var(--primary);color:white;cursor:pointer;font-size:12px">
+                        Override
+                    </button>
+                    <button onclick="this.parentElement.querySelectorAll('button').forEach(b=>b.style.fontWeight='normal');this.style.fontWeight='bold';window._dupActions['${d.name}']='skip'"
+                        style="padding:4px 12px;border-radius:4px;border:1px solid var(--border);background:var(--bg-secondary);cursor:pointer;font-size:12px">
+                        Skip
+                    </button>
+                </div>
+            </div>`).join('');
+
+        overlay.innerHTML = `
+            <div style="background:var(--bg-primary);border:1px solid var(--border);border-radius:12px;padding:24px;width:480px;max-width:90vw">
+                <div style="font-size:16px;font-weight:700;margin-bottom:4px">⚠️ Phát hiện bài trùng lặp</div>
+                <div style="font-size:13px;color:var(--text-muted);margin-bottom:16px">Các bài sau đã tồn tại trên Polygon. Chọn Override để ghi đè hoặc Skip để bỏ qua:</div>
+                ${rows}
+                <div style="display:flex;gap:8px;margin-top:16px;justify-content:flex-end">
+                    <button onclick="document.body.removeChild(this.closest('[style*=fixed]'));resolve_dup(false)" 
+                        style="padding:8px 16px;border-radius:6px;border:1px solid var(--border);background:var(--bg-secondary);cursor:pointer">
+                        Huỷ
+                    </button>
+                    <button onclick="document.body.removeChild(this.closest('[style*=fixed]'));resolve_dup(true)"
+                        style="padding:8px 16px;border-radius:6px;border:none;background:var(--primary);color:white;cursor:pointer;font-weight:600">
+                        Tiếp tục Upload
+                    </button>
+                </div>
+            </div>`;
+
+        window._dupActions = {};
+        // Set default: override
+        duplicates.forEach(d => { window._dupActions[d.name] = 'override'; });
+
+        window.resolve_dup = (ok) => {
+            Object.assign(actionsOut, window._dupActions);
+            resolve(ok);
+        };
+
+        document.body.appendChild(overlay);
+    });
+}
+
 async function startUpload() {
     const btn = document.getElementById('btn-start-upload');
     btn.disabled = true;
-    btn.textContent = '⏳ Đang bắt đầu...';
+    btn.textContent = '🔍 Kiểm tra trùng lặp...';
 
     const indices = uploadProblems.map(p => p.index);
 
     try {
-        const resp = await fetch('/api/upload', {
+        // Check duplicates trước
+        const checkResp = await fetch('/api/check-duplicates', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ indices }),
+        });
+        const checkData = await checkResp.json();
+        const duplicates = checkData.duplicates || [];
+
+        let duplicateActions = {};
+        if (duplicates.length > 0) {
+            // Hiện dialog cho user chọn
+            const confirmed = await showDuplicateDialog(duplicates, duplicateActions);
+            if (!confirmed) {
+                btn.disabled = false;
+                btn.textContent = '🚀 Bắt đầu Upload';
+                return;
+            }
+        }
+
+        btn.textContent = '⏳ Đang bắt đầu...';
+
+        const resp = await fetch('/api/upload', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ indices, duplicate_actions: duplicateActions }),
         });
         const data = await resp.json();
 

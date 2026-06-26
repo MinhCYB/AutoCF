@@ -70,11 +70,14 @@ def _compile(src_path: str, out_path: str, include_dirs: list[str]) -> None:
         cmd,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=COMPILE_TIMEOUT,
     )
     if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
         raise CompileError(
-            f"Compile thất bại:\n{result.stderr.strip()}"
+            f"Compile thất bại:\n{stderr}"
         )
     logger.info("Compile OK → %s", out_path)
 
@@ -85,11 +88,13 @@ def _run_once(binary: str, seed: int) -> str:
         [binary, str(seed)],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=RUN_TIMEOUT,
     )
     if result.returncode != 0:
         raise RunError(
-            f"Generator crash (seed={seed}):\n{result.stderr.strip()}"
+            f"Generator crash (seed={seed}):\n{(result.stderr or '').strip()}"
         )
     return result.stdout
 

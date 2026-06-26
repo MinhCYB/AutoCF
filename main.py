@@ -84,6 +84,7 @@ async def startup():
         "polygon_secret": os.getenv("POLYGON_SECRET", ""),
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
         "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
+        "groq_api_key": os.getenv("GROQ_API_KEY", ""),
         "parser_backend": os.getenv("PARSER_BACKEND", "gemini"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "llava"),
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
@@ -154,6 +155,7 @@ class SaveConfigRequest(BaseModel):
     polygon_secret: str = ""
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
+    groq_api_key: str = ""
     parser_backend: str = "gemini"   # "gemini" | "ollama" | "g4f"
     ollama_model: str = "llava"
     ollama_url: str = "http://localhost:11434"
@@ -177,6 +179,8 @@ async def save_config(req: SaveConfigRequest):
         state.config["polygon_secret"] = req.polygon_secret
     if req.gemini_api_key:
         state.config["gemini_api_key"] = req.gemini_api_key
+    if req.groq_api_key:
+        state.config["groq_api_key"] = req.groq_api_key
 
     state.config["gemini_model"] = req.gemini_model
     state.config["parser_backend"] = req.parser_backend
@@ -211,6 +215,7 @@ async def save_config(req: SaveConfigRequest):
     existing["POLYGON_API_KEY"]  = _val("POLYGON_API_KEY",  state.config["polygon_api_key"])
     existing["POLYGON_SECRET"]   = _val("POLYGON_SECRET",   state.config["polygon_secret"])
     existing["GEMINI_API_KEY"]   = _val("GEMINI_API_KEY",   state.config["gemini_api_key"])
+    existing["GROQ_API_KEY"]     = _val("GROQ_API_KEY",     state.config.get("groq_api_key", ""))
     existing["TESTLIB_PATH"]     = _val("TESTLIB_PATH",     state.config.get("testlib_path", ""))
     existing["GEN_TESTS"]        = "true" if state.config["gen_tests"] else "false"
     existing["GEN_SOLUTION"]     = "true" if state.config["gen_solution"] else "false"
@@ -360,6 +365,11 @@ async def parse_single(idx: int):
         problem.polygon_name = scan["polygon_name"]
         problem.solution_path = scan.get("solution_path", "")
         problem.tests_dir = scan.get("tests_dir", "")
+
+        if problem.subtasks:
+            logger.info("[parse %d] ✅ Extracted %d subtask(s) từ đề", idx, len(problem.subtasks))
+        else:
+            logger.info("[parse %d] Không phát hiện subtask trong đề — user tự nhập", idx)
 
         state.problems[idx] = {
             "problem": problem.model_dump(),
@@ -568,7 +578,7 @@ async def gen_test_preview(problem_index: int):
     AI gen subtasks + compile local + chạy generator → trả về test inputs để preview.
     Subtasks được lưu lại vào problem để upload dùng lại (không gen lại).
     """
-    from modules.parser import g4f_codegen
+    from modules.parser import groq_codegen
     from modules.parser.models import Subtask
     from modules.polygon.test_runner import compile_and_run, CompileError, RunError
 
@@ -577,8 +587,7 @@ async def gen_test_preview(problem_index: int):
         return JSONResponse({"error": f"Không tìm thấy bài #{problem_index}"}, status_code=404)
 
     problem = Problem(**entry["problem"])
-    gemini_api_key = state.config.get("gemini_api_key", "")
-    gemini_model   = state.config.get("gemini_model", "gemini-2.0-flash")
+    groq_api_key = state.config.get("groq_api_key", "")
     testlib_path   = state.config.get("testlib_path", "") or problem.testlib_path
 
     if not testlib_path:
@@ -588,7 +597,7 @@ async def gen_test_preview(problem_index: int):
     subtasks = problem.subtasks
     if not subtasks:
         try:
-            subtasks = await g4f_codegen.gen_subtasks(problem, gemini_api_key, gemini_model)
+            subtasks = await groq_codegen.gen_subtasks(problem, groq_api_key)
         except Exception as e:
             return JSONResponse({"error": f"AI gen subtask thất bại: {e}"}, status_code=500)
 
@@ -618,8 +627,8 @@ async def gen_test_preview(problem_index: int):
         compile_error_hint = None
         for gen_attempt in range(MAX_GEN_RETRIES):
             try:
-                gen_code = await g4f_codegen.gen_generator_for_subtask(
-                    problem, st, gemini_api_key, gemini_model,
+                gen_code = await groq_codegen.gen_generator_for_subtask(
+                    problem, st, groq_api_key,
                     compile_error_hint=compile_error_hint,
                 )
                 inputs = await compile_and_run(
@@ -658,6 +667,49 @@ async def gen_test_preview(problem_index: int):
 
 class UploadRequest(BaseModel):
     indices: Optional[list[int]] = None  # None = upload all confirmed
+    duplicate_actions: Optional[dict[str, str]] = None  # {polygon_name: "override"|"skip"}
+
+
+@app.post("/api/check-duplicates")
+async def check_duplicates(req: UploadRequest):
+    """Check which problems already exist on Polygon before upload."""
+    from modules.polygon.client import PolygonClient
+
+    polygon_key = state.config.get("polygon_api_key", "")
+    polygon_secret = state.config.get("polygon_secret", "")
+    if not polygon_key or not polygon_secret:
+        return JSONResponse({"error": "Chưa cấu hình Polygon API keys"}, status_code=400)
+
+    indices = req.indices if req.indices is not None else [
+        idx for idx, data in state.problems.items()
+        if data["status"] in ("confirmed", "parsed")
+    ]
+
+    try:
+        client = PolygonClient(polygon_key, polygon_secret)
+        list_result = await client.call("problems.list")
+        raw_list = list_result.get("result", [])
+        if isinstance(raw_list, list):
+            problems_list = raw_list
+        elif isinstance(raw_list, dict):
+            problems_list = raw_list.get("problems", [])
+        else:
+            problems_list = []
+
+        existing_names = {p["name"] for p in problems_list if isinstance(p, dict) and "name" in p}
+
+        duplicates = []
+        for idx in indices:
+            entry = state.problems.get(idx)
+            if not entry:
+                continue
+            name = entry["problem"].get("polygon_name", "")
+            if name in existing_names:
+                duplicates.append({"index": idx, "name": name})
+
+        return {"duplicates": duplicates}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.post("/api/upload")
@@ -690,7 +742,7 @@ async def start_upload(req: UploadRequest):
     state.upload_running = True
 
     # Launch background task
-    asyncio.create_task(_upload_task(indices, polygon_key, polygon_secret))
+    asyncio.create_task(_upload_task(indices, polygon_key, polygon_secret, req.duplicate_actions or {}))
 
     return {
         "status": "ok",
@@ -699,7 +751,7 @@ async def start_upload(req: UploadRequest):
     }
 
 
-async def _upload_task(indices: list[int], api_key: str, secret: str):
+async def _upload_task(indices: list[int], api_key: str, secret: str, duplicate_actions: dict = {}):
     """Background task that uploads problems sequentially."""
     client = PolygonClient(api_key, secret)
     lang = state.config.get("lang", "vietnamese")
@@ -719,6 +771,22 @@ async def _upload_task(indices: list[int], api_key: str, secret: str):
 
             prob_data = entry["problem"]
             problem = Problem(**prob_data)
+
+            # Kiểm tra duplicate action
+            action = duplicate_actions.get(problem.polygon_name, "override")
+            if action == "skip":
+                await state.log_queue.put({
+                    "type": "log",
+                    "index": idx,
+                    "message": f"⏭ Bỏ qua '{problem.polygon_name}' (đã tồn tại, user chọn Skip)",
+                })
+                await state.log_queue.put({
+                    "type": "problem_done",
+                    "index": idx,
+                    "name": problem.polygon_name,
+                    "status": "skipped",
+                })
+                continue
 
             await state.log_queue.put({
                 "type": "problem_start",
@@ -742,7 +810,7 @@ async def _upload_task(indices: list[int], api_key: str, secret: str):
                     on_log=on_log,
                     gen_solution=state.config.get("gen_solution", False),
                     gen_tests=state.config.get("gen_tests", False),
-                    gemini_api_key=state.config.get("gemini_api_key", ""),
+                    gemini_api_key=state.config.get("groq_api_key", ""),
                     gemini_model=state.config.get("gemini_model", "gemini-2.0-flash"),
                     testlib_path=state.config.get("testlib_path", ""),
                     cached_test_inputs=entry.get("test_inputs"),  # từ gen-test-preview
