@@ -663,6 +663,29 @@ async def gen_test_preview(problem_index: int):
     }
 
 
+@app.post("/api/gen-solution-preview/{problem_index}")
+async def gen_solution_preview(problem_index: int):
+    """AI gen solution C++ và cache lại, dùng khi upload."""
+    from modules.parser import groq_codegen
+    from modules.parser.models import Problem
+
+    entry = state.problems.get(problem_index)
+    if not entry:
+        return JSONResponse({"error": f"Không tìm thấy bài #{problem_index}"}, status_code=404)
+
+    problem = Problem(**entry["problem"])
+    groq_api_key = state.config.get("groq_api_key", "")
+    if not groq_api_key:
+        return JSONResponse({"error": "Chưa cấu hình Groq API key"}, status_code=400)
+
+    try:
+        sol_code = await groq_codegen.gen_solution(problem, groq_api_key)
+        entry["solution_code"] = sol_code
+        return {"status": "ok", "solution": sol_code}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ─── API: Upload ──────────────────────────────────────
 
 class UploadRequest(BaseModel):
@@ -813,7 +836,8 @@ async def _upload_task(indices: list[int], api_key: str, secret: str, duplicate_
                     gemini_api_key=state.config.get("groq_api_key", ""),
                     gemini_model=state.config.get("gemini_model", "gemini-2.0-flash"),
                     testlib_path=state.config.get("testlib_path", ""),
-                    cached_test_inputs=entry.get("test_inputs"),  # từ gen-test-preview
+                    cached_test_inputs=entry.get("test_inputs"),
+                    cached_solution_code=entry.get("solution_code"),
                 )
 
                 entry["status"] = "uploaded"

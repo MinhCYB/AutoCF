@@ -179,6 +179,21 @@
             <div id="files-info" class="text-sm text-muted"></div>
         </div>
 
+        <!-- Gen Solution Preview -->
+        <div class="card mt-4" id="gen-solution-card">
+            <div class="card-header">
+                <div class="card-icon" style="background:rgba(34,197,94,.15);color:#22c55e">💡</div>
+                <div>
+                    <div class="card-title">Gen Solution Preview</div>
+                    <div class="card-desc" id="gen-solution-desc">AI gen solution C++ trước khi upload</div>
+                </div>
+                <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
+                    <button class="btn btn-ghost btn-sm" id="btn-gen-solution" onclick="genSolutionPreview()">💡 Gen Solution</button>
+                </div>
+            </div>
+            <div id="gen-solution-body" style="display:none;margin-top:8px"></div>
+        </div>
+
         <!-- Gen Test Preview -->
         <div class="card mt-4" id="gen-test-card">
             <div class="card-header">
@@ -293,6 +308,14 @@ function showProblem(idx) {
     if (prob.tests_dir) filesInfo.push(`📁 Tests: ${prob.tests_dir.split(/[\\/]/).pop()}/`);
     if (filesInfo.length === 0) filesInfo.push('Không có solution hoặc tests');
     document.getElementById('files-info').innerHTML = filesInfo.join('<br>');
+
+    // Reset gen solution card
+    const solBody = document.getElementById('gen-solution-body');
+    const solDesc = document.getElementById('gen-solution-desc');
+    const solBtn  = document.getElementById('btn-gen-solution');
+    if (solBody) { solBody.style.display = 'none'; solBody.innerHTML = ''; }
+    if (solDesc) solDesc.textContent = 'AI gen solution C++ trước khi upload';
+    if (solBtn)  { solBtn.disabled = false; solBtn.textContent = '💡 Gen Solution'; }
 
     // Subtasks — nếu đã extract lúc parse thì hiển thị luôn để user review
     const body = document.getElementById('gen-test-body');
@@ -429,6 +452,39 @@ function saveCurrent() {
             input: inputs[i].value,
             output: outputs[i].value,
         });
+    }
+}
+
+// ─── Gen Solution Preview ───
+async function genSolutionPreview() {
+    const idx = problems[currentIdx].index;
+    const btn = document.getElementById('btn-gen-solution');
+    const body = document.getElementById('gen-solution-body');
+    const desc = document.getElementById('gen-solution-desc');
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang gen...';
+    desc.textContent = 'AI đang gen solution...';
+    body.style.display = 'none';
+    body.innerHTML = '';
+
+    try {
+        const resp = await fetch(`/api/gen-solution-preview/${idx}`, { method: 'POST' });
+        const data = await resp.json();
+
+        if (!resp.ok || data.error) {
+            desc.textContent = '❌ ' + (data.error || 'Lỗi không xác định');
+            return;
+        }
+
+        desc.textContent = '✅ Solution đã gen — xem bên dưới';
+        body.style.display = 'block';
+        body.innerHTML = `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;overflow-x:auto;max-height:300px;white-space:pre-wrap">${escHtml(data.solution)}</pre>`;
+    } catch(e) {
+        desc.textContent = '❌ ' + e.message;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 Gen lại';
     }
 }
 
