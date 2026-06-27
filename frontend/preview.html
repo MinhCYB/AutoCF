@@ -212,6 +212,7 @@
                 </div>
                 <div style="margin-left:auto;display:flex;gap:8px;align-items:center">
                     <button class="btn btn-ghost btn-sm" id="btn-gen-test" onclick="genTestPreview()">⚡ Gen Test</button>
+                    <button class="btn btn-ghost btn-sm" id="btn-reset-subtask" onclick="resetToSubtaskEdit()" style="display:none;margin-left:6px">✏️ Sửa subtask</button>
                 </div>
             </div>
             <div id="gen-test-body" style="display:none;margin-top:8px"></div>
@@ -231,6 +232,7 @@
 let problems = [];
 let currentIdx = 0;
 let currentEditingField = 'statement'; // which field the LaTeX editor is editing
+const solutionCache = {}; // cache kết quả gen solution theo problem index
 
 // ─── Load problems ───
 (async function init() {
@@ -309,13 +311,22 @@ function showProblem(idx) {
     if (filesInfo.length === 0) filesInfo.push('Không có solution hoặc tests');
     document.getElementById('files-info').innerHTML = filesInfo.join('<br>');
 
-    // Reset gen solution card
+    // Reset gen solution card rồi tự động gen ngầm
     const solBody = document.getElementById('gen-solution-body');
     const solDesc = document.getElementById('gen-solution-desc');
     const solBtn  = document.getElementById('btn-gen-solution');
     if (solBody) { solBody.style.display = 'none'; solBody.innerHTML = ''; }
-    if (solDesc) solDesc.textContent = 'AI gen solution C++ trước khi upload';
-    if (solBtn)  { solBtn.disabled = false; solBtn.textContent = '💡 Gen Solution'; }
+
+    const probIdx = entry.index;
+    if (solutionCache[probIdx]) {
+        // Đã có cache → render luôn
+        _renderSolution(solutionCache[probIdx], solDesc, solBody, solBtn);
+    } else {
+        // Chưa có → hiện trạng thái đang gen và gọi ngầm
+        if (solDesc) solDesc.textContent = '⏳ Đang gen solution...';
+        if (solBtn)  { solBtn.disabled = true; solBtn.textContent = '⏳ Đang gen...'; }
+        _autoGenSolution(probIdx, solDesc, solBody, solBtn);
+    }
 
     // Subtasks — nếu đã extract lúc parse thì hiển thị luôn để user review
     const body = document.getElementById('gen-test-body');
@@ -436,9 +447,11 @@ function navigate(delta) {
     const body = document.getElementById('gen-test-body');
     const desc = document.getElementById('gen-test-desc');
     const btn  = document.getElementById('btn-gen-test');
+    const btnReset = document.getElementById('btn-reset-subtask');
     if (body) { body.style.display = 'none'; body.innerHTML = ''; }
     if (desc) desc.textContent = 'Sinh test local theo subtask trước khi upload';
     if (btn)  { btn.disabled = false; btn.textContent = '⚡ Gen Test'; }
+    if (btnReset) btnReset.style.display = 'none';
     showProblem(currentIdx + delta);
 }
 
@@ -471,11 +484,55 @@ function saveCurrent() {
 }
 
 // ─── Gen Solution Preview ───
+// ─── Gen Solution helpers ───
+function _renderSolution(data, desc, body, btn) {
+    if (data.error) {
+        if (desc) desc.textContent = '❌ ' + data.error;
+        if (btn)  { btn.disabled = false; btn.textContent = '🔄 Gen lại'; }
+        return;
+    }
+    if (desc) desc.textContent = '✅ Solution đã gen — xem bên dưới';
+    if (body) {
+        body.style.display = 'block';
+        body.innerHTML = `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;overflow-x:auto;max-height:300px;white-space:pre-wrap">${escHtml(data.solution)}</pre>`;
+    }
+    if (btn)  { btn.disabled = false; btn.textContent = '🔄 Gen lại'; }
+}
+
+async function _autoGenSolution(probIdx, desc, body, btn) {
+    try {
+        const resp = await fetch(`/api/gen-solution-preview/${probIdx}`, { method: 'POST' });
+        const data = await resp.json();
+        const result = (!resp.ok || data.error) ? { error: data.error || 'Lỗi không xác định' } : data;
+        solutionCache[probIdx] = result;
+
+        // Chỉ render nếu user vẫn đang xem bài này
+        if (problems[currentIdx]?.index === probIdx) {
+            _renderSolution(result,
+                document.getElementById('gen-solution-desc'),
+                document.getElementById('gen-solution-body'),
+                document.getElementById('btn-gen-solution'));
+        }
+    } catch(e) {
+        const result = { error: e.message };
+        solutionCache[probIdx] = result;
+        if (problems[currentIdx]?.index === probIdx) {
+            _renderSolution(result,
+                document.getElementById('gen-solution-desc'),
+                document.getElementById('gen-solution-body'),
+                document.getElementById('btn-gen-solution'));
+        }
+    }
+}
+
 async function genSolutionPreview() {
     const idx = problems[currentIdx].index;
     const btn = document.getElementById('btn-gen-solution');
     const body = document.getElementById('gen-solution-body');
     const desc = document.getElementById('gen-solution-desc');
+
+    // Xóa cache để force gen lại
+    delete solutionCache[idx];
 
     btn.disabled = true;
     btn.textContent = '⏳ Đang gen...';
@@ -483,24 +540,7 @@ async function genSolutionPreview() {
     body.style.display = 'none';
     body.innerHTML = '';
 
-    try {
-        const resp = await fetch(`/api/gen-solution-preview/${idx}`, { method: 'POST' });
-        const data = await resp.json();
-
-        if (!resp.ok || data.error) {
-            desc.textContent = '❌ ' + (data.error || 'Lỗi không xác định');
-            return;
-        }
-
-        desc.textContent = '✅ Solution đã gen — xem bên dưới';
-        body.style.display = 'block';
-        body.innerHTML = `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;overflow-x:auto;max-height:300px;white-space:pre-wrap">${escHtml(data.solution)}</pre>`;
-    } catch(e) {
-        desc.textContent = '❌ ' + e.message;
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '🔄 Gen lại';
-    }
+    await _autoGenSolution(idx, desc, body, btn);
 }
 
 // ─── Gen Test Preview ───
@@ -566,12 +606,48 @@ async function genTestPreview() {
             n_tests: st.n_tests,
         }));
 
+        // Hiện nút Sửa subtask, đổi Gen Test → Gen lại
+        btn.textContent = '🔄 Gen lại';
+        const btnReset = document.getElementById('btn-reset-subtask');
+        if (btnReset) btnReset.style.display = '';
+
     } catch(e) {
         desc.textContent = '❌ ' + e.message;
     } finally {
         btn.disabled = false;
-        btn.textContent = '🔄 Gen lại';
     }
+}
+
+function resetToSubtaskEdit() {
+    const prob = problems[currentIdx]?.problem;
+    const body = document.getElementById('gen-test-body');
+    const desc = document.getElementById('gen-test-desc');
+    const btn  = document.getElementById('btn-gen-test');
+    const btnReset = document.getElementById('btn-reset-subtask');
+
+    if (btnReset) btnReset.style.display = 'none';
+    btn.textContent = '⚡ Gen Test';
+
+    if (prob?.subtasks && prob.subtasks.length > 0) {
+        desc.textContent = `✅ ${prob.subtasks.length} subtask — chỉnh sửa rồi bấm Gen Test`;
+        body.style.display = 'block';
+        body.innerHTML = `
+            <textarea id="subtask-edit-area" rows="${prob.subtasks.length + 1}"
+                style="width:100%;font-family:monospace;font-size:13px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary)"
+            >${prob.subtasks.map(st => `${st.score} | ${st.constraints} | ${st.n_tests}`).join('\n')}</textarea>
+        `;
+    } else {
+        desc.textContent = '⚠️ Không phát hiện subtask — nhập thủ công bên dưới';
+        body.style.display = 'block';
+        body.innerHTML = `
+            <textarea id="subtask-edit-area" rows="4"
+                style="width:100%;font-family:monospace;font-size:13px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:8px;color:var(--text-primary)"
+                placeholder="20 | 1 ≤ n ≤ 100 | 5&#10;30 | 1 ≤ n ≤ 1000 | 5&#10;50 | 1 ≤ n ≤ 100000 | 5"></textarea>
+        `;
+    }
+
+    // Scroll tới card để user thấy textarea
+    document.getElementById('gen-test-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderSubtaskResult(st) {
