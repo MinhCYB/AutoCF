@@ -319,3 +319,28 @@ async def gen_generator_for_subtask(
         label = f"generator-subtask{subtask.index}"
 
     return await _call_groq(api_key, prompt, label, model or DEFAULT_MODEL)
+
+async def suggest_subtask(problem: "Problem", api_key: str = "", model: str = "") -> str:
+    """
+    Khi không tìm được subtask từ đề, AI đề xuất 1 subtask 100đ
+    dựa trên constraints trong đề. Trả về string dạng 'score | constraints | n_tests'.
+    """
+    prompt = f"""You are given a competitive programming problem. No explicit subtasks are defined.
+Based on the constraints mentioned in the problem, propose ONE subtask worth 100 points.
+
+Problem title: {problem.title}
+Statement: {problem.statement}
+Input format: {problem.input_format}
+
+Reply with EXACTLY one line in this format (nothing else):
+100 | <constraint expression, e.g. 1 ≤ n ≤ 100000> | 10
+
+Use the actual constraints from the problem. If unclear, use reasonable defaults."""
+
+    result = await _call_groq(api_key, prompt, "suggest-subtask", model or DEFAULT_MODEL)
+    # Clean up — take first non-empty line
+    for line in result.strip().splitlines():
+        line = line.strip()
+        if "|" in line:
+            return line
+    return "100 | 1 ≤ n ≤ 1000 | 10"

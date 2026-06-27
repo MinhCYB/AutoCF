@@ -549,9 +549,16 @@ async def gen_test_preview(problem_index: int):
             return JSONResponse({"error": f"AI gen subtask thất bại: {e}"}, status_code=500)
 
     if not subtasks:
+        # AI đề xuất 1 subtask duy nhất dựa trên constraints trong đề
+        suggested = "100 | 1 ≤ n ≤ 1000 | 10"
+        try:
+            suggested = await groq_codegen.suggest_subtask(problem, groq_api_key)
+        except Exception:
+            pass
         return JSONResponse({
             "error": "no_subtasks",
-            "message": "AI không phát hiện subtask. Hãy nhập thủ công."
+            "message": "AI không phát hiện subtask. Hãy nhập thủ công.",
+            "suggested": suggested,
         }, status_code=422)
 
     # Lưu subtasks vào problem để upload dùng lại
