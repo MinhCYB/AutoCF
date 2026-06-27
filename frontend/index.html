@@ -19,82 +19,18 @@
         </div>
     </header>
 
-    <!-- Polygon API Config -->
-    <div class="card" id="card-polygon">
-        <div class="card-header">
-            <div class="card-icon blue">🔑</div>
-            <div>
-                <div class="card-title">Polygon API <span id="polygon-status" class="badge badge-info" style="display:none"></span></div>
-                <div class="card-desc">API key từ polygon.codeforces.com → Settings</div>
-            </div>
-        </div>
-        <div class="form-row">
-            <div class="form-group">
-                <label for="polygon-key">API Key</label>
-                <input type="password" id="polygon-key" placeholder="Nhập Polygon API Key...">
-            </div>
-            <div class="form-group">
-                <label for="polygon-secret">Secret</label>
-                <input type="password" id="polygon-secret" placeholder="Nhập Polygon Secret...">
-            </div>
-        </div>
-    </div>
 
-    <div class="card" id="card-gemini">
+
+    <div class="card" id="card-ai">
         <div class="card-header">
             <div class="card-icon green">🤖</div>
             <div>
-                <div class="card-title">Parser <span id="gemini-status" class="badge badge-info" style="display:none"></span></div>
-                <div class="card-desc">Chọn backend để parse đề bài từ ảnh</div>
+                <div class="card-title">AI Config</div>
+                <div class="card-desc">Groq API — parse ảnh đề + gen test/solution</div>
             </div>
         </div>
-        <!-- Backend selector -->
-        <div class="form-row" style="margin-bottom:8px">
-            <div class="form-group">
-                <label for="parser-backend">Backend</label>
-                <select id="parser-backend" onchange="onParserBackendChange()">
-                    <option value="groq">⚡ Groq API (vision)</option>
-                    <option value="gemini">☁️ Gemini API (cloud)</option>
-                    <option value="ollama">🦙 Ollama (local)</option>
-                    <option value="g4f">🆓 GPT4Free (no key)</option>
-                </select>
-            </div>
-        </div>
-        <!-- Gemini fields -->
-        <div id="parser-gemini-fields">
-            <div class="form-row">
-                <div class="form-group" style="flex:2">
-                    <label for="gemini-key">Gemini API Key</label>
-                    <input type="password" id="gemini-key" placeholder="Nhập Gemini API Key...">
-                </div>
-                <div class="form-group" style="flex:1">
-                    <label for="gemini-model">Model</label>
-                    <select id="gemini-model">
-                        <option value="gemini-2.0-flash">⚡ 2.0 Flash</option>
-                        <option value="gemini-2.0-flash-lite">🪶 2.0 Flash Lite</option>
-                        <option value="gemini-2.5-flash">🚀 2.5 Flash</option>
-                        <option value="gemini-1.5-flash">📦 1.5 Flash</option>
-                    </select>
-                </div>
-            </div>
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="groq-key">Groq API Key <span style="font-size:11px;color:var(--text-muted)">(dùng cho gen test/solution — free 14,400 req/day)</span></label>
-                    <input type="password" id="groq-key" placeholder="Nhập Groq API Key...">
-                </div>
-            </div>
-        </div>
-        <!-- g4f fields -->
-        <div id="parser-g4f-fields" style="display:none">
-            <div class="form-row">
-                <div class="form-group">
-                    <label for="g4f-delay">Delay giữa các provider (giây)</label>
-                    <input type="number" id="g4f-delay" value="15" min="2" max="120" step="1">
-                </div>
-            </div>
-        </div>
-        <!-- Parse delay — applies to all backends -->
-        <div class="form-row" style="margin-top:8px">
+        <!-- Parse delay -->
+        <div class="form-row" style="margin-top:4px">
             <div class="form-group">
                 <label for="parse-delay">Delay giữa các bài (giây)</label>
                 <input type="number" id="parse-delay" value="15" min="0" max="300" step="1">
@@ -111,24 +47,7 @@
                 <label for="gen-tests" style="margin:0;font-weight:500">🤖 Gen test generator C++</label>
             </div>
         </div>
-        <div class="form-group" style="margin-top:8px" id="testlib-path-group">
-            <label for="testlib-path" style="font-size:12px;color:#888">📁 Đường dẫn testlib.h (cần cho Gen Test)</label>
-            <input type="text" id="testlib-path" placeholder="C:\testlib\testlib.h hoặc /home/user/testlib/testlib.h">
-        </div>
-        <div class="field-notice" style="margin-top:4px;font-size:12px;color:#888">Dùng Gemini API key để gen — chỉ gửi text đề, không gửi ảnh</div>
-        <!-- Ollama fields -->
-        <div id="parser-ollama-fields" style="display:none">
-            <div class="form-row">
-                <div class="form-group" style="flex:2">
-                    <label for="ollama-model">Model</label>
-                    <input type="text" id="ollama-model" placeholder="llava:7b-v1.6-mistral-q4_0">
-                </div>
-                <div class="form-group" style="flex:1">
-                    <label for="ollama-url">URL</label>
-                    <input type="text" id="ollama-url" placeholder="http://localhost:11434">
-                </div>
-            </div>
-        </div>
+
     </div>
 
     <!-- Batch Config -->
@@ -257,11 +176,6 @@ let scanResults = [];
     if (saved.contest_name) document.getElementById('contest-name').value = saved.contest_name;
     if (saved.start_index) document.getElementById('start-index').value = saved.start_index;
     if (saved.lang) document.getElementById('lang').value = saved.lang;
-    if (saved.gemini_model) document.getElementById('gemini-model').value = saved.gemini_model;
-    if (saved.parser_backend) { document.getElementById('parser-backend').value = saved.parser_backend; onParserBackendChange(); }
-    if (saved.ollama_model) document.getElementById('ollama-model').value = saved.ollama_model;
-    if (saved.ollama_url) document.getElementById('ollama-url').value = saved.ollama_url;
-    if (saved.g4f_delay) document.getElementById('g4f-delay').value = saved.g4f_delay;
     if (saved.parse_delay) document.getElementById('parse-delay').value = saved.parse_delay;
     if (saved.gen_solution) document.getElementById('gen-solution').checked = saved.gen_solution;
     if (saved.gen_tests) document.getElementById('gen-tests').checked = saved.gen_tests;
@@ -281,79 +195,25 @@ let scanResults = [];
         if (!saved.contest_name && config.contest_name) document.getElementById('contest-name').value = config.contest_name;
         if (config.start_index && !saved.start_index) document.getElementById('start-index').value = config.start_index;
         if (!saved.lang && config.lang) document.getElementById('lang').value = config.lang;
-        if (!saved.gemini_model && config.gemini_model) document.getElementById('gemini-model').value = config.gemini_model;
-        if (!saved.parser_backend && config.parser_backend) { document.getElementById('parser-backend').value = config.parser_backend; onParserBackendChange(); }
-        if (!saved.ollama_model && config.ollama_model) document.getElementById('ollama-model').value = config.ollama_model;
-        if (!saved.ollama_url && config.ollama_url) document.getElementById('ollama-url').value = config.ollama_url;
-        if (!saved.g4f_delay && config.g4f_delay) document.getElementById('g4f-delay').value = config.g4f_delay;
         if (!saved.parse_delay && config.parse_delay) document.getElementById('parse-delay').value = config.parse_delay;
         if (config.gen_solution) document.getElementById('gen-solution').checked = config.gen_solution;
         if (config.gen_tests) document.getElementById('gen-tests').checked = config.gen_tests;
-        if (config.testlib_path) document.getElementById('testlib-path').value = config.testlib_path;
 
-        // Show key status from .env
-        const polygonStatus = document.getElementById('polygon-status');
-        if (config.polygon_api_key_set && config.polygon_secret_set) {
-            polygonStatus.textContent = '✅ Đã cấu hình từ .env';
-            polygonStatus.className = 'badge badge-success';
-            polygonStatus.style.display = 'inline-flex';
-            document.getElementById('polygon-key').placeholder = config.polygon_api_key_display || '●●●●●●';
-            document.getElementById('polygon-secret').placeholder = config.polygon_secret_display || '●●●●●●';
-        } else if (config.polygon_api_key_set || config.polygon_secret_set) {
-            polygonStatus.textContent = '⚠️ Thiếu key';
-            polygonStatus.className = 'badge badge-warning';
-            polygonStatus.style.display = 'inline-flex';
-        }
 
-        const geminiStatus = document.getElementById('gemini-status');
-        if (config.gemini_api_key_set) {
-            geminiStatus.textContent = '✅ Đã cấu hình từ .env';
-            geminiStatus.className = 'badge badge-success';
-            geminiStatus.style.display = 'inline-flex';
-            document.getElementById('gemini-key').placeholder = config.gemini_api_key_display || '●●●●●●';
-        }
-
-        // Store server config status
-        window._serverKeyStatus = {
-            polygon_api_key_set: config.polygon_api_key_set,
-            polygon_secret_set: config.polygon_secret_set,
-            gemini_api_key_set: config.gemini_api_key_set,
-        };
 
     } catch (e) {
         console.warn('Could not fetch server config:', e);
     }
 
     // 3) If localStorage has keys (user entered before), fill them
-    if (saved.polygon_key) document.getElementById('polygon-key').value = saved.polygon_key;
-    if (saved.polygon_secret) document.getElementById('polygon-secret').value = saved.polygon_secret;
-    if (saved.gemini_key) document.getElementById('gemini-key').value = saved.gemini_key;
-        if (saved.groq_key) document.getElementById('groq-key').value = saved.groq_key;
 })();
 
-function onParserBackendChange() {
-    const backend = document.getElementById('parser-backend').value;
-    document.getElementById('parser-gemini-fields').style.display = backend === 'gemini' ? '' : 'none';
-    document.getElementById('parser-ollama-fields').style.display = backend === 'ollama' ? '' : 'none';
-    document.getElementById('parser-g4f-fields').style.display = backend === 'g4f' ? '' : 'none';
-    // groq dùng chung groq-key field đã có sẵn, không cần field riêng
-}
 
 function saveConfigLocal() {
     const config = {
-        polygon_key: document.getElementById('polygon-key').value,
-        polygon_secret: document.getElementById('polygon-secret').value,
-        gemini_key: document.getElementById('gemini-key').value,
-        groq_key: document.getElementById('groq-key').value,
-        gemini_model: document.getElementById('gemini-model').value,
-        parser_backend: document.getElementById('parser-backend').value,
-        ollama_model: document.getElementById('ollama-model').value,
-        ollama_url: document.getElementById('ollama-url').value,
-        g4f_delay: parseFloat(document.getElementById('g4f-delay').value) || 15,
         parse_delay: parseFloat(document.getElementById('parse-delay').value) || 15,
         gen_solution: document.getElementById('gen-solution').checked,
         gen_tests: document.getElementById('gen-tests').checked,
-        testlib_path: document.getElementById('testlib-path').value.trim(),
         level: document.getElementById('level').value,
         contest_name: document.getElementById('contest-name').value,
         start_index: document.getElementById('start-index').value,
@@ -643,30 +503,14 @@ async function startParse() {
 }
 
 async function saveConfigToServer() {
-    // Only send keys that user actually entered (not empty = keep server's .env value)
-    const polygonKey = document.getElementById('polygon-key').value;
-    const polygonSecret = document.getElementById('polygon-secret').value;
-    const geminiKey = document.getElementById('gemini-key').value;
-    const groqKey = document.getElementById('groq-key').value;
-
     await fetch('/api/save-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            polygon_api_key: polygonKey,   // empty string = server keeps existing
-            polygon_secret: polygonSecret,
-            gemini_api_key: geminiKey,
-            groq_api_key: groqKey,
-            gemini_model: document.getElementById('gemini-model').value,
-            parser_backend: document.getElementById('parser-backend').value,
-            ollama_model: document.getElementById('ollama-model').value,
-            ollama_url: document.getElementById('ollama-url').value,
-            g4f_delay: parseFloat(document.getElementById('g4f-delay').value) || 15,
             parse_delay: parseFloat(document.getElementById('parse-delay').value) || 15,
             gen_solution: document.getElementById('gen-solution').checked,
             gen_tests: document.getElementById('gen-tests').checked,
-            testlib_path: document.getElementById('testlib-path').value.trim(),
-            lang: document.getElementById('lang').value,
+                lang: document.getElementById('lang').value,
             level: document.getElementById('level').value,
             contest_name: document.getElementById('contest-name').value,
             start_index: parseInt(document.getElementById('start-index').value) || 1,

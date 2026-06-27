@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from modules.batch.scanner import scan_problems_dir
 from modules.parser.file_loader import load_file
-from modules.parser import gemini_parser, ollama_parser, g4f_parser, groq_parser
+from modules.parser import groq_parser
 from modules.parser.models import Example, Problem
 from modules.polygon.client import PolygonClient
 from modules.polygon.uploader import upload_problem
@@ -82,13 +82,8 @@ async def startup():
     state.config = {
         "polygon_api_key": os.getenv("POLYGON_API_KEY", ""),
         "polygon_secret": os.getenv("POLYGON_SECRET", ""),
-        "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
-        "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         "groq_api_key": os.getenv("GROQ_API_KEY", ""),
         "parser_backend": os.getenv("PARSER_BACKEND", "groq"),
-        "ollama_model": os.getenv("OLLAMA_MODEL", "llava"),
-        "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
-        "g4f_delay": float(os.getenv("G4F_DELAY", "15")),
         "parse_delay": float(os.getenv("PARSE_DELAY", "15")),
         "gen_solution": os.getenv("GEN_SOLUTION", "false").lower() == "true",
         "gen_tests": os.getenv("GEN_TESTS", "false").lower() == "true",
@@ -130,36 +125,14 @@ async def get_config():
 
     # Mask secrets for display, but tell frontend they exist
     # Pass through non-secret fields directly
-    for field in ("gemini_model", "parser_backend", "ollama_model", "ollama_url",
-                  "lang", "level", "contest_name", "start_index"):
-        if field in c:
-            pass  # already in c
-
-    for key in ("polygon_api_key", "polygon_secret", "gemini_api_key"):
-        val = c.get(key, "")
-        if len(val) > 8:
-            c[key + "_display"] = val[:4] + "●" * (len(val) - 8) + val[-4:]
-        elif val:
-            c[key + "_display"] = "●" * len(val)
-        else:
-            c[key + "_display"] = ""
-        c[key + "_set"] = bool(val)
-        # Don't send raw key values to frontend
+    for key in ("polygon_api_key", "polygon_secret"):
+        c[key + "_set"] = bool(c.get(key, ""))
         c.pop(key, None)
 
     return c
 
 
 class SaveConfigRequest(BaseModel):
-    polygon_api_key: str = ""
-    polygon_secret: str = ""
-    gemini_api_key: str = ""
-    gemini_model: str = "gemini-2.0-flash"
-    groq_api_key: str = ""
-    parser_backend: str = "groq"   # "groq" | "gemini" | "ollama" | "g4f"
-    ollama_model: str = "llava"
-    ollama_url: str = "http://localhost:11434"
-    g4f_delay: float = 15.0
     parse_delay: float = 15.0
     gen_solution: bool = False
     gen_tests: bool = False
@@ -173,25 +146,12 @@ class SaveConfigRequest(BaseModel):
 @app.post("/api/save-config")
 async def save_config(req: SaveConfigRequest):
     """Update in-memory config and optionally write to .env."""
-    if req.polygon_api_key:
-        state.config["polygon_api_key"] = req.polygon_api_key
-    if req.polygon_secret:
-        state.config["polygon_secret"] = req.polygon_secret
-    if req.gemini_api_key:
-        state.config["gemini_api_key"] = req.gemini_api_key
     if req.groq_api_key:
         state.config["groq_api_key"] = req.groq_api_key
 
-    state.config["gemini_model"] = req.gemini_model
-    state.config["parser_backend"] = req.parser_backend
-    state.config["ollama_model"] = req.ollama_model
-    state.config["ollama_url"] = req.ollama_url
-    state.config["g4f_delay"] = req.g4f_delay
     state.config["parse_delay"] = req.parse_delay
     state.config["gen_solution"] = req.gen_solution
     state.config["gen_tests"] = req.gen_tests
-    if req.testlib_path:  # chỉ update nếu có giá trị, tránh xoá path cũ
-        state.config["testlib_path"] = req.testlib_path
     state.config["lang"] = req.lang
     state.config["level"] = req.level
     state.config["contest_name"] = req.contest_name
@@ -214,7 +174,6 @@ async def save_config(req: SaveConfigRequest):
         return val
     existing["POLYGON_API_KEY"]  = _val("POLYGON_API_KEY",  state.config["polygon_api_key"])
     existing["POLYGON_SECRET"]   = _val("POLYGON_SECRET",   state.config["polygon_secret"])
-    existing["GEMINI_API_KEY"]   = _val("GEMINI_API_KEY",   state.config["gemini_api_key"])
     existing["GROQ_API_KEY"]     = _val("GROQ_API_KEY",     state.config.get("groq_api_key", ""))
     existing["TESTLIB_PATH"]     = _val("TESTLIB_PATH",     state.config.get("testlib_path", ""))
     existing["GEN_TESTS"]        = "true" if state.config["gen_tests"] else "false"
@@ -325,10 +284,10 @@ async def parse_single(idx: int):
         logger.warning("[parse %d] Không có file đề cho %s", idx, scan["folder"])
         return JSONResponse({"error": "Không có file đề"}, status_code=400)
 
-    gemini_key = state.config.get("gemini_api_key", "")
-    if not gemini_key:
-        logger.error("[parse %d] Gemini API key chưa được cấu hình!", idx)
-        return JSONResponse({"error": "Chưa cấu hình Gemini API key"}, status_code=400)
+    groq_key = state.config.get("groq_api_key", "")
+    if not groq_key:
+        logger.error("[parse %d] Groq API key chưa được cấu hình!", idx)
+        return JSONResponse({"error": "Chưa cấu hình Groq API key"}, status_code=400)
 
     logger.info("[parse %d] Bắt đầu parse: %s (file: %s)", idx, scan["folder"], file_path)
 
@@ -341,25 +300,9 @@ async def parse_single(idx: int):
             idx, len(content.images), len(content.text),
         )
 
-        # Step 2: Call parser
-        backend = state.config.get("parser_backend", "groq")
-        groq_key = state.config.get("groq_api_key", "")
-        if backend == "ollama":
-            ollama_model = state.config.get("ollama_model", "llava")
-            ollama_url = state.config.get("ollama_url", "http://localhost:11434")
-            logger.info("[parse %d] Gọi Ollama (model: %s, url: %s)...", idx, ollama_model, ollama_url)
-            problem = await ollama_parser.parse_problem(content, model=ollama_model, base_url=ollama_url)
-        elif backend == "g4f":
-            g4f_delay = state.config.get("g4f_delay", 15.0)
-            logger.info("[parse %d] Gọi g4f (free providers, delay=%.0fs)...", idx, g4f_delay)
-            problem = await g4f_parser.parse_problem(content, retry_delay=g4f_delay)
-        elif backend == "gemini":
-            gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
-            logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
-            problem = await gemini_parser.parse_problem(content, gemini_key, model=gemini_model)
-        else:  # groq (default)
-            logger.info("[parse %d] Gọi Groq vision (model: %s)...", idx, groq_parser.VISION_MODEL)
-            problem = await groq_parser.parse_problem(content, api_key=groq_key)
+        # Step 2: Call Groq parser
+        logger.info("[parse %d] Gọi Groq vision (model: %s)...", idx, groq_parser.VISION_MODEL)
+        problem = await groq_parser.parse_problem(content, api_key=groq_key)
         logger.info(
             "[parse %d] ✅ Parse thành công — title: %s, %d example(s)",
             idx, problem.title, len(problem.examples),
@@ -696,7 +639,7 @@ class SaveSolutionRequest(BaseModel):
 @app.put("/api/solution-code/{problem_index}")
 async def save_solution_code(problem_index: int, req: SaveSolutionRequest):
     """Lưu solution code đã chỉnh sửa từ frontend."""
-    entry = next((e for e in state.problems if e["index"] == problem_index), None)
+    entry = state.problems.get(problem_index)
     if not entry:
         return JSONResponse({"error": "Problem not found"}, status_code=404)
     entry["solution_code"] = req.code
@@ -850,8 +793,7 @@ async def _upload_task(indices: list[int], api_key: str, secret: str, duplicate_
                     on_log=on_log,
                     gen_solution=state.config.get("gen_solution", False),
                     gen_tests=state.config.get("gen_tests", False),
-                    gemini_api_key=state.config.get("groq_api_key", ""),
-                    gemini_model=state.config.get("gemini_model", "gemini-2.0-flash"),
+                    groq_api_key=state.config.get("groq_api_key", ""),
                     testlib_path=state.config.get("testlib_path", ""),
                     cached_test_inputs=entry.get("test_inputs"),
                     cached_solution_code=entry.get("solution_code"),

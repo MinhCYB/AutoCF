@@ -160,8 +160,7 @@ async def upload_problem(
     gen_solution: bool = False,
     cached_solution_code: str | None = None,
     gen_tests: bool = False,
-    gemini_api_key: str = "",
-    gemini_model: str = "gemini-2.0-flash",
+    groq_api_key: str = "",
     testlib_path: str = "",
     cached_test_inputs: dict | None = None,
 ) -> dict:
@@ -357,7 +356,7 @@ async def upload_problem(
         await log(f"✅ Tags: {', '.join(problem.tags)}")
 
     # ── 7. AI Codegen (optional) — chạy TRƯỚC commit ──────────────────────────
-    # Cả gen_solution lẫn gen_tests đều dùng g4f (DeepSeek), không cần gemini_api_key
+    # Gen solution/tests dùng Groq (groq_codegen)
     if gen_solution or cached_solution_code:
         sol_code = cached_solution_code
         if sol_code:
@@ -365,7 +364,7 @@ async def upload_problem(
         else:
             await log("🤖 Gen solution C++ bằng Groq...")
             try:
-                sol_code = await g4f_codegen.gen_solution(problem, gemini_api_key)
+                sol_code = await groq_codegen.gen_solution(problem, groq_api_key)
             except Exception as e:
                 await log(f"⚠️ Gen solution thất bại: {e}")
                 sol_code = None
