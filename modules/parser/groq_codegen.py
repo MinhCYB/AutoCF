@@ -43,6 +43,28 @@ Examples:
 --- HẾT ĐỀ ---
 
 Hãy viết solution C++ hoàn chỉnh, đúng, hiệu quả cho bài này.
+
+Cấu trúc code BẮT BUỘC:
+#include <bits/stdc++.h>
+using namespace std;
+
+const int MAXN = 1e6 + 7;  // hằng số khai báo NGOÀI main
+// mảng, biến global khác nếu cần
+
+int main() {
+    ios_base::sync_with_stdio(false);
+    cin.tie(0);
+    // code
+    return 0;
+}
+
+Yêu cầu bắt buộc:
+- Hằng số (MAXN, MOD, ...) và mảng tĩnh lớn PHẢI khai báo ở global scope, NGOÀI hàm main
+- KHÔNG khai báo hằng hay mảng lớn bên trong main
+- KHÔNG dùng VLA như `int a[n]` — dùng `vector<int> a(n)` hoặc mảng global với MAXN
+- Dùng `long long` khi giá trị có thể vượt 2^31
+- Compile được với g++ -O2 -std=c++17
+
 CHỈ trả về code C++ thuần túy, không có markdown, không có giải thích.
 Bắt đầu bằng #include."""
 

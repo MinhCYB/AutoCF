@@ -53,6 +53,7 @@
             <div class="form-group">
                 <label for="parser-backend">Backend</label>
                 <select id="parser-backend" onchange="onParserBackendChange()">
+                    <option value="groq">⚡ Groq API (vision)</option>
                     <option value="gemini">☁️ Gemini API (cloud)</option>
                     <option value="ollama">🦙 Ollama (local)</option>
                     <option value="g4f">🆓 GPT4Free (no key)</option>
@@ -335,6 +336,7 @@ function onParserBackendChange() {
     document.getElementById('parser-gemini-fields').style.display = backend === 'gemini' ? '' : 'none';
     document.getElementById('parser-ollama-fields').style.display = backend === 'ollama' ? '' : 'none';
     document.getElementById('parser-g4f-fields').style.display = backend === 'g4f' ? '' : 'none';
+    // groq dùng chung groq-key field đã có sẵn, không cần field riêng
 }
 
 function saveConfigLocal() {

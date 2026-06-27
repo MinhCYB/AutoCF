@@ -36,7 +36,7 @@ from pydantic import BaseModel
 
 from modules.batch.scanner import scan_problems_dir
 from modules.parser.file_loader import load_file
-from modules.parser import gemini_parser, ollama_parser, g4f_parser
+from modules.parser import gemini_parser, ollama_parser, g4f_parser, groq_parser
 from modules.parser.models import Example, Problem
 from modules.polygon.client import PolygonClient
 from modules.polygon.uploader import upload_problem
@@ -85,7 +85,7 @@ async def startup():
         "gemini_api_key": os.getenv("GEMINI_API_KEY", ""),
         "gemini_model": os.getenv("GEMINI_MODEL", "gemini-2.0-flash"),
         "groq_api_key": os.getenv("GROQ_API_KEY", ""),
-        "parser_backend": os.getenv("PARSER_BACKEND", "gemini"),
+        "parser_backend": os.getenv("PARSER_BACKEND", "groq"),
         "ollama_model": os.getenv("OLLAMA_MODEL", "llava"),
         "ollama_url": os.getenv("OLLAMA_URL", "http://localhost:11434"),
         "g4f_delay": float(os.getenv("G4F_DELAY", "15")),
@@ -156,7 +156,7 @@ class SaveConfigRequest(BaseModel):
     gemini_api_key: str = ""
     gemini_model: str = "gemini-2.0-flash"
     groq_api_key: str = ""
-    parser_backend: str = "gemini"   # "gemini" | "ollama" | "g4f"
+    parser_backend: str = "groq"   # "groq" | "gemini" | "ollama" | "g4f"
     ollama_model: str = "llava"
     ollama_url: str = "http://localhost:11434"
     g4f_delay: float = 15.0
@@ -341,8 +341,9 @@ async def parse_single(idx: int):
             idx, len(content.images), len(content.text),
         )
 
-        # Step 2: Call parser (Gemini or Ollama)
-        backend = state.config.get("parser_backend", "gemini")
+        # Step 2: Call parser
+        backend = state.config.get("parser_backend", "groq")
+        groq_key = state.config.get("groq_api_key", "")
         if backend == "ollama":
             ollama_model = state.config.get("ollama_model", "llava")
             ollama_url = state.config.get("ollama_url", "http://localhost:11434")
@@ -352,10 +353,13 @@ async def parse_single(idx: int):
             g4f_delay = state.config.get("g4f_delay", 15.0)
             logger.info("[parse %d] Gọi g4f (free providers, delay=%.0fs)...", idx, g4f_delay)
             problem = await g4f_parser.parse_problem(content, retry_delay=g4f_delay)
-        else:
+        elif backend == "gemini":
             gemini_model = state.config.get("gemini_model", "gemini-2.0-flash")
             logger.info("[parse %d] Gọi Gemini API (model: %s)...", idx, gemini_model)
             problem = await gemini_parser.parse_problem(content, gemini_key, model=gemini_model)
+        else:  # groq (default)
+            logger.info("[parse %d] Gọi Groq vision (model: %s)...", idx, groq_parser.VISION_MODEL)
+            problem = await groq_parser.parse_problem(content, api_key=groq_key)
         logger.info(
             "[parse %d] ✅ Parse thành công — title: %s, %d example(s)",
             idx, problem.title, len(problem.examples),

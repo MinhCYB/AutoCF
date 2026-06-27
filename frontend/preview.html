@@ -6,10 +6,18 @@
     <title>Polygon Uploader — Preview</title>
     <meta name="description" content="Preview và chỉnh sửa đề bài trước khi upload">
     <link rel="stylesheet" href="/static/style.css">
-    <!-- KaTeX -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css">
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js"></script>
+    <!-- MathJax (giống Polygon) -->
+    <script>
+    window.MathJax = {
+        tex: {
+            inlineMath: [['$', '$']],
+            displayMath: [['$$', '$$'], ['\\[', '\\]']],
+            processEscapes: true,
+        },
+        options: { skipHtmlTags: ['script','noscript','style','textarea','pre'] },
+    };
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script"></script>
 </head>
 <body>
 
@@ -67,7 +75,7 @@
                 </div>
             </div>
             <div class="split-right">
-                <div class="panel-header">👁️ Preview (KaTeX)</div>
+                <div class="panel-header">👁️ Preview (MathJax)</div>
                 <div class="panel-body">
                     <div class="katex-preview" id="katex-preview">
                         <p class="text-muted">Preview sẽ hiện ở đây...</p>
@@ -247,19 +255,11 @@ let currentEditingField = 'statement'; // which field the LaTeX editor is editin
     }
 })();
 
-// ─── Render KaTeX ───
+// ─── Render MathJax ───
 function renderKatex() {
-    const el = document.getElementById('katex-preview');
-    if (typeof renderMathInElement === 'function') {
-        renderMathInElement(el, {
-            delimiters: [
-                {left: '$$', right: '$$', display: true},
-                {left: '$', right: '$', display: false},
-                {left: '\\[', right: '\\]', display: true},
-                {left: '\\(', right: '\\)', display: false},
-            ],
-            throwOnError: false,
-        });
+    if (window.MathJax && window.MathJax.typesetPromise) {
+        const el = document.getElementById('katex-preview');
+        window.MathJax.typesetPromise([el]).catch(err => console.warn('MathJax error:', err));
     }
 }
 
@@ -346,12 +346,27 @@ function updatePreview() {
     const text = document.getElementById('latex-editor').value;
     const preview = document.getElementById('katex-preview');
 
-    // Convert LaTeX to HTML-friendly format
+    // Tách $$...$$ thành block riêng trước khi convert newline
+    // để MathJax nhận diện display math đúng
     let html = text
-        .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
-        .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
-        .replace(/\\\\|\n\n/g, '</p><p>')
-        .replace(/\n/g, '<br>');
+        // Đảm bảo $$ block có newline trước/sau
+        .replace(/([^\n])\$\$/g, '$1\n$$')
+        .replace(/\$\$([^\n])/g, '$$\n$1')
+        // Split theo $$...$$ blocks
+        .split(/((\$\$[\s\S]*?\$\$))/g)
+        .map((part, i) => {
+            if (part.startsWith('$$') && part.endsWith('$$')) {
+                // Block math — giữ nguyên, bọc trong div riêng
+                return '</p><div style="text-align:center;margin:8px 0">' + part + '</div><p>';
+            }
+            // Text thường — convert
+            return part
+                .replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>')
+                .replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>')
+                .replace(/\n\n/g, '</p><p>')
+                .replace(/\n/g, '<br>');
+        })
+        .join('');
 
     preview.innerHTML = '<p>' + html + '</p>';
     renderKatex();
