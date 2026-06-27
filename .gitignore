@@ -1,6 +1,47 @@
+# ── Secrets ───────────────────────────────────────────
 .env
+
+# ── Python ────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+
+# ── Virtual envs ──────────────────────────────────────
 venv/
 .venv/
 env/
+.env/
 *.conda
 conda-meta/
+
+# ── Build / dist ──────────────────────────────────────
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ── Test artifacts (gen local, không upload) ──────────
+/tmp_tests/
+/gen_output/
+*.exe
+*.o
+*.out
+gen
+gen.exe
+
+# ── OS ────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Editor ────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Logs ──────────────────────────────────────────────
+*.log
