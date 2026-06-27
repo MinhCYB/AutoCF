@@ -690,7 +690,20 @@ async def gen_solution_preview(problem_index: int):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
-# ─── API: Upload ──────────────────────────────────────
+class SaveSolutionRequest(BaseModel):
+    code: str
+
+@app.put("/api/solution-code/{problem_index}")
+async def save_solution_code(problem_index: int, req: SaveSolutionRequest):
+    """Lưu solution code đã chỉnh sửa từ frontend."""
+    entry = next((e for e in state.problems if e["index"] == problem_index), None)
+    if not entry:
+        return JSONResponse({"error": "Problem not found"}, status_code=404)
+    entry["solution_code"] = req.code
+    return {"status": "ok"}
+
+
+
 
 class UploadRequest(BaseModel):
     indices: Optional[list[int]] = None  # None = upload all confirmed

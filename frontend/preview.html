@@ -484,6 +484,34 @@ function saveCurrent() {
 }
 
 // ─── Gen Solution Preview ───
+async function saveSolutionCode() {
+    const idx = problems[currentIdx].index;
+    const ta = document.getElementById('solution-edit-area');
+    const btn = document.getElementById('btn-save-solution');
+    if (!ta) { console.error('solution-edit-area not found'); return; }
+    if (!btn) { console.error('btn-save-solution not found'); return; }
+
+    btn.disabled = true;
+    btn.textContent = '⏳ Đang lưu...';
+    try {
+        const resp = await fetch(`/api/solution-code/${idx}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: ta.value }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || data.error) throw new Error(data.error || `HTTP ${resp.status}`);
+        // Cập nhật cache
+        if (solutionCache[idx]) solutionCache[idx].solution = ta.value;
+        btn.textContent = '✅ Đã lưu';
+        setTimeout(() => { btn.textContent = '💾 Lưu'; btn.disabled = false; }, 1500);
+    } catch(e) {
+        console.error('saveSolutionCode error:', e);
+        btn.textContent = '❌ ' + e.message;
+        btn.disabled = false;
+    }
+}
+
 // ─── Gen Solution helpers ───
 function _renderSolution(data, desc, body, btn) {
     if (data.error) {
@@ -494,7 +522,15 @@ function _renderSolution(data, desc, body, btn) {
     if (desc) desc.textContent = '✅ Solution đã gen — xem bên dưới';
     if (body) {
         body.style.display = 'block';
-        body.innerHTML = `<pre style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;font-size:12px;overflow-x:auto;max-height:300px;white-space:pre-wrap">${escHtml(data.solution)}</pre>`;
+        body.innerHTML = `
+            <div style="display:flex;justify-content:flex-end;margin-bottom:6px">
+                <button class="btn btn-ghost btn-sm" id="btn-save-solution" onclick="saveSolutionCode()">💾 Lưu</button>
+            </div>
+            <textarea id="solution-edit-area"
+                style="width:100%;font-family:monospace;font-size:12px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;padding:12px;color:var(--text-primary);resize:vertical;min-height:200px;max-height:500px;line-height:1.5"
+                spellcheck="false"
+            >${escHtml(data.solution)}</textarea>
+        `;
     }
     if (btn)  { btn.disabled = false; btn.textContent = '🔄 Gen lại'; }
 }
