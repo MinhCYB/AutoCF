@@ -51,12 +51,12 @@ using namespace std;
 const int MAXN = 1e6 + 7;  // hằng số khai báo NGOÀI main
 // mảng, biến global khác nếu cần
 
-int main() {
+int main() {{
     ios_base::sync_with_stdio(false);
     cin.tie(0);
     // code
     return 0;
-}
+}}
 
 Yêu cầu bắt buộc:
 - Hằng số (MAXN, MOD, ...) và mảng tĩnh lớn PHẢI khai báo ở global scope, NGOÀI hàm main
