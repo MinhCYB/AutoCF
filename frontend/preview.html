@@ -90,6 +90,16 @@
             </div>
             <div class="form-row">
                 <div class="form-group">
+                    <label for="edit-input-file">Input file <span style="font-weight:400;color:var(--text-muted)">(để trống = stdin)</span></label>
+                    <input type="text" id="edit-input-file" placeholder="stdin" oninput="schedulePreview()">
+                </div>
+                <div class="form-group">
+                    <label for="edit-output-file">Output file <span style="font-weight:400;color:var(--text-muted)">(để trống = stdout)</span></label>
+                    <input type="text" id="edit-output-file" placeholder="stdout" oninput="schedulePreview()">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
                     <label for="edit-time">Time Limit (ms)</label>
                     <input type="number" id="edit-time" value="1000" min="250" max="15000" step="50">
                 </div>
@@ -322,6 +332,8 @@ function showProblem(idx) {
     document.getElementById('edit-time').value = prob.time_limit || 1000;
     document.getElementById('edit-memory').value = prob.memory_limit || 256;
     document.getElementById('edit-checker').value = prob.checker || 'lcmp';
+    document.getElementById('edit-input-file').value = prob.input_file || '';
+    document.getElementById('edit-output-file').value = prob.output_file || '';
     renderTags(prob.tags && prob.tags.length ? prob.tags : ['yb-boclot']);
 
     // Statement → LaTeX editor
@@ -409,7 +421,12 @@ function updatePreview() {
     const show = (id, v) => { const el = document.getElementById(id); if(el) el.style.display = v ? '' : 'none'; };
 
     set('pv-title', escHtml(title));
-    set('pv-limits', `time limit per test: ${timeMs >= 1000 ? timeMs/1000 + ' second' : timeMs + ' ms'}<br>memory limit per test: ${memMb} megabytes`);
+    const inputFile  = document.getElementById('edit-input-file')?.value.trim() || prob.input_file || '';
+    const outputFile = document.getElementById('edit-output-file')?.value.trim() || prob.output_file || '';
+    const ioLine = inputFile || outputFile
+        ? `<br>input: ${inputFile || 'stdin'} / output: ${outputFile || 'stdout'}`
+        : '';
+    set('pv-limits', `time limit per test: ${timeMs >= 1000 ? timeMs/1000 + ' second' : timeMs + ' ms'}<br>memory limit per test: ${memMb} megabytes${ioLine}`);
     set('pv-statement', latexToHtml(stmt));
     set('pv-input', latexToHtml(inp)); show('pv-input-section', inp.trim());
     set('pv-output', latexToHtml(out)); show('pv-output-section', out.trim());
@@ -507,6 +524,8 @@ function saveCurrent() {
     prob.time_limit = parseInt(document.getElementById('edit-time').value) || 1000;
     prob.memory_limit = parseInt(document.getElementById('edit-memory').value) || 256;
     prob.checker = document.getElementById('edit-checker').value;
+    prob.input_file = document.getElementById('edit-input-file').value.trim();
+    prob.output_file = document.getElementById('edit-output-file').value.trim();
     prob.tags = getCurrentTags();
     prob.statement = document.getElementById('latex-editor').value;
     prob.input_format = document.getElementById('edit-input').value;

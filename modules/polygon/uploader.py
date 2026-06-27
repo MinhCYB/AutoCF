@@ -232,6 +232,8 @@ async def upload_problem(
         problemId=problem_id,
         timeLimit=problem.time_limit,
         memoryLimit=problem.memory_limit,
+        inputFile=problem.input_file or "",
+        outputFile=problem.output_file or "",
     )
     await log("✅ Limits đã cập nhật")
 

@@ -52,6 +52,10 @@ class Problem(BaseModel):
     # --- Subtasks (populated by AI or user) ---
     subtasks: list[Subtask] = []
 
+    # --- I/O mode ---
+    input_file: str = ""         # "" = stdin, hoặc tên file vd "input.txt"
+    output_file: str = ""        # "" = stdout, hoặc tên file vd "output.txt"
+
     # --- Optional file paths ---
     solution_path: str = ""
     tests_dir: str = ""
