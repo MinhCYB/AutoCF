@@ -322,6 +322,7 @@ async def parse_single(idx: int):
             "problem": problem.model_dump(),
             "status": "parsed",
             "scan": scan,
+            "file_path": file_path,
         }
 
         return {"status": "ok", "problem": problem.model_dump()}
@@ -642,6 +643,25 @@ async def gen_solution_preview(problem_index: int):
 
 class SaveSolutionRequest(BaseModel):
     code: str
+
+@app.get("/api/problem-file/{problem_index}")
+async def get_problem_file(problem_index: int):
+    """Trả về file đề gốc để embed trong preview."""
+    import mimetypes
+    entry = state.problems.get(problem_index)
+    if not entry:
+        return JSONResponse({"error": "Not found"}, status_code=404)
+    file_path = entry.get("file_path") or entry.get("scan", {}).get("selected_file", "")
+    if not file_path:
+        files = entry.get("scan", {}).get("problem_files", [])
+        file_path = files[0]["path"] if files else ""
+    if not file_path or not Path(file_path).exists():
+        return JSONResponse({"error": "File not found"}, status_code=404)
+    mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    from fastapi.responses import FileResponse
+    return FileResponse(file_path, media_type=mime)
+
+
 
 @app.put("/api/solution-code/{problem_index}")
 async def save_solution_code(problem_index: int, req: SaveSolutionRequest):

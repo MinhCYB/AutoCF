@@ -115,7 +115,10 @@ Notes: {notes}
 --- HẾT ĐỀ ---
 
 Hãy xác định các subtask của bài này dựa trên constraints trong đề.
-Nếu đề KHÔNG có subtask rõ ràng, trả về mảng rỗng [].
+
+Nếu đề CÓ subtask rõ ràng (ví dụ "Subtask 1: 20 điểm, n ≤ 100"), hãy liệt kê đầy đủ.
+Nếu đề KHÔNG có subtask rõ ràng nhưng có constraints (trong Notes, Statement, hoặc Input), hãy tạo 1 subtask duy nhất 100 điểm với constraints đó.
+Chỉ trả về [] nếu đề hoàn toàn không có constraints nào.
 
 Trả về ĐÚNG JSON sau, không giải thích thêm:
 [

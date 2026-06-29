@@ -70,7 +70,37 @@
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start">
 
         <!-- ── LEFT COL: Edit fields ── -->
-        <div>
+        <div id="left-col">
+
+        <!-- Toggle bar -->
+        <div style="display:flex;gap:0;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <button id="tab-edit" onclick="switchLeftTab('edit')"
+                style="flex:1;padding:8px 0;font-size:13px;font-weight:600;border:none;cursor:pointer;background:var(--primary);color:#fff;transition:all .15s">
+                ✏️ Chỉnh sửa
+            </button>
+            <button id="tab-file" onclick="switchLeftTab('file')"
+                style="flex:1;padding:8px 0;font-size:13px;font-weight:600;border:none;cursor:pointer;background:var(--bg-secondary);color:var(--text-muted);transition:all .15s">
+                📄 File gốc
+            </button>
+        </div>
+
+        <!-- File viewer (hidden by default) -->
+        <div id="panel-file" style="display:none">
+            <div class="card" style="height:calc(100vh - 160px);overflow:hidden;padding:0">
+                <iframe id="file-frame" src="" style="width:100%;height:100%;border:none;display:none"></iframe>
+                <img id="file-img" src="" style="width:100%;height:100%;object-fit:contain;display:none">
+                <div id="file-unsupported" style="display:none;padding:24px;color:var(--text-muted);text-align:center">
+                    <p style="font-size:32px;margin-bottom:8px">📎</p>
+                    <p>Không thể preview định dạng này</p>
+                </div>
+                <div id="file-loading" style="padding:24px;color:var(--text-muted);text-align:center">
+                    <p>⏳ Đang tải file...</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Edit panels (shown by default) -->
+        <div id="panel-edit">
 
         <!-- Problem Settings -->
         <div class="card">
@@ -222,10 +252,17 @@
             <div id="gen-test-body" style="display:none;margin-top:8px"></div>
         </div>
 
+        </div><!-- end panel-edit -->
         </div><!-- end left col -->
 
         <!-- ── RIGHT COL: Polygon-style full preview ── -->
         <div style="position:sticky;top:20px">
+        <!-- Header khớp với toggle bar bên trái -->
+        <div style="display:flex;margin-bottom:16px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <div style="flex:1;padding:8px 0;font-size:13px;font-weight:600;background:var(--bg-secondary);color:var(--text-muted);text-align:center">
+                Polygon Preview
+            </div>
+        </div>
         <div class="card" style="max-height:calc(100vh - 100px);overflow-y:auto">
             <div id="polygon-preview" style="padding:24px 28px;font-family:'Times New Roman',serif;font-size:16px">
                 <!-- Title -->
@@ -269,7 +306,83 @@
 </div>
 
 <script>
-// ─── State ───
+// ─── Left col tab toggle ───
+let _fileLoaded = -1; // track which problem's file is loaded
+
+function switchLeftTab(tab) {
+    const panelEdit = document.getElementById('panel-edit');
+    const panelFile = document.getElementById('panel-file');
+    const tabEdit   = document.getElementById('tab-edit');
+    const tabFile   = document.getElementById('tab-file');
+
+    if (tab === 'file') {
+        panelEdit.style.display = 'none';
+        panelFile.style.display = '';
+        tabEdit.style.background = 'var(--bg-secondary)';
+        tabEdit.style.color = 'var(--text-muted)';
+        tabFile.style.background = 'var(--primary)';
+        tabFile.style.color = '#fff';
+        _loadOriginalFile();
+    } else {
+        panelFile.style.display = 'none';
+        panelEdit.style.display = '';
+        tabEdit.style.background = 'var(--primary)';
+        tabEdit.style.color = '#fff';
+        tabFile.style.background = 'var(--bg-secondary)';
+        tabFile.style.color = 'var(--text-muted)';
+    }
+}
+
+function _loadOriginalFile() {
+    const idx = problems[currentIdx]?.index;
+    if (idx === undefined) return;
+    if (_fileLoaded === idx) return; // already loaded
+    _fileLoaded = idx;
+
+    const frame   = document.getElementById('file-frame');
+    const img     = document.getElementById('file-img');
+    const unsup   = document.getElementById('file-unsupported');
+    const loading = document.getElementById('file-loading');
+
+    // Reset
+    frame.style.display = 'none'; frame.src = '';
+    img.style.display = 'none'; img.src = '';
+    unsup.style.display = 'none';
+    loading.style.display = '';
+
+    const url = `/api/problem-file/${idx}`;
+
+    // Detect ext from scan data
+    const entry = problems[currentIdx];
+    const filePath = entry?.file_path || '';
+    const ext = filePath.split('.').pop().toLowerCase();
+
+    if (['pdf'].includes(ext)) {
+        frame.src = url;
+        frame.style.display = '';
+        loading.style.display = 'none';
+    } else if (['png','jpg','jpeg','webp','gif'].includes(ext)) {
+        img.src = url;
+        img.onload = () => { loading.style.display = 'none'; img.style.display = ''; };
+        img.onerror = () => { loading.style.display = 'none'; unsup.style.display = ''; };
+    } else {
+        loading.style.display = 'none';
+        unsup.style.display = '';
+    }
+}
+
+// Reset file tab when navigating to a new problem
+function _resetFileTab() {
+    _fileLoaded = -1;
+    const frame = document.getElementById('file-frame');
+    const img   = document.getElementById('file-img');
+    if (frame) { frame.src = ''; frame.style.display = 'none'; }
+    if (img)   { img.src = '';   img.style.display = 'none'; }
+    document.getElementById('file-loading').style.display = '';
+    document.getElementById('file-unsupported').style.display = 'none';
+}
+
+
 let problems = [];
 let currentIdx = 0;
 let currentEditingField = 'statement'; // which field the LaTeX editor is editing
@@ -505,11 +618,7 @@ function removeExample(i) {
 // ─── Navigation ───
 function navigate(delta) {
     saveCurrent();
-    // Reset gen test card
-    const body = document.getElementById('gen-test-body');
-    const desc = document.getElementById('gen-test-desc');
-    const btn  = document.getElementById('btn-gen-test');
-    const btnReset = document.getElementById('btn-reset-subtask');
+    _resetFileTab();
     // Reset visual (cache giữ nguyên)
     showProblem(currentIdx + delta);
 }
@@ -721,7 +830,7 @@ async function genTestPreview() {
             const parts = line.split('|').map(s => s.trim());
             return {
                 index: i + 1,
-                score: parseInt(parts[0]) || 100,
+                score: parseInt(parts[0].replace(/\D/g, '')) || 100,
                 constraints: parts[1] || '',
                 n_tests: parseInt(parts[2]) || 10,
             };
@@ -752,6 +861,7 @@ function resetToSubtaskEdit() {
     const btnReset = document.getElementById('btn-reset-subtask');
 
     if (btnReset) btnReset.style.display = 'none';
+    btn.disabled = false;
     btn.textContent = '⚡ Gen Test';
 
     if (prob?.subtasks && prob.subtasks.length > 0) {
